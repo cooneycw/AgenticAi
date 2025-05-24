@@ -810,6 +810,11 @@ Return only valid JSON, no explanations."""
             ("stockholm", "sweden"): "ARN",
             ("oslo", "norway"): "OSL",
             ("helsinki", "finland"): "HEL",
+            ("prague", "czech republic"): "PRG",
+            ("prague", "czechia"): "PRG",
+            ("budapest", "hungary"): "BUD",
+            ("warsaw", "poland"): "WAW",
+            ("brussels", "belgium"): "BRU",
             ("tokyo", "japan"): "NRT",
             ("seoul", "south korea"): "ICN",
             ("singapore", "singapore"): "SIN",
@@ -1030,27 +1035,38 @@ Return only valid JSON, no explanations."""
                 elif not origin_airport or not dest_airport:
                     result['api_status'] = f"missing_airports: {origin_airport or 'origin'}, {dest_airport or 'dest'}"
 
-            # Fallback to geographic estimates if FR24 data not available
-            if not result['fr24_data_available']:
-                if distance_km < 1500:
-                    flight_time = distance_km / 700 + 0.5
-                    routing = "Direct flights likely"
-                elif distance_km < 4000:
-                    flight_time = distance_km / 800 + 0.75
-                    routing = "Direct or 1 stop"
-                else:
-                    flight_time = distance_km / 850 + 1.5
-                    routing = "1-2 stops typical"
+            # Always set fallback geographic estimates (ensure consistent data structure)
+            if distance_km < 1500:
+                flight_time = distance_km / 700 + 0.5
+                routing = "Direct flights likely"
+            elif distance_km < 4000:
+                flight_time = distance_km / 800 + 0.75
+                routing = "Direct or 1 stop"
+            else:
+                flight_time = distance_km / 850 + 1.5
+                routing = "1-2 stops typical"
 
-                hours = int(flight_time)
-                minutes = int((flight_time - hours) * 60)
+            hours = int(flight_time)
+            minutes = int((flight_time - hours) * 60)
 
-                result.update({
-                    'flight_time_hours': flight_time,
-                    'flight_time_display': f"{hours}h {minutes}m",
-                    'routing': routing,
-                    'data_source': 'geographic_estimate'
-                })
+            # Always set these fields regardless of FR24 status
+            result.update({
+                'flight_time_hours': flight_time,
+                'flight_time_display': f"{hours}h {minutes}m",
+                'routing': routing,
+                'data_source': 'fr24_enhanced' if result['fr24_data_available'] else 'geographic_estimate'
+            })
+
+            # If FR24 data is available, potentially override with more accurate timing
+            if result['fr24_data_available'] and result.get('recommended_flights'):
+                # Use the best flight recommendation for timing if available
+                best_flight = result['recommended_flights'][0] if result['recommended_flights'] else {}
+                if best_flight.get('duration_hours') and best_flight['duration_hours'] > 0:
+                    result.update({
+                        'flight_time_hours': best_flight['duration_hours'],
+                        'flight_time_display': best_flight['duration_display'],
+                        'data_source': 'fr24_real_data'
+                    })
 
             return result
 
@@ -1314,6 +1330,20 @@ Criteria: {parsed_query.additional_criteria}
                                                                            country_name)
 
                             if 'error' not in flight_info:
+                                # Ensure flight_info has required fields before merging
+                                if 'flight_time_hours' not in flight_info:
+                                    # Add fallback flight time if missing
+                                    distance_km = flight_info.get('distance_km', 5000)
+                                    flight_time = distance_km / 800 + 1.0
+                                    hours = int(flight_time)
+                                    minutes = int((flight_time - hours) * 60)
+                                    flight_info.update({
+                                        'flight_time_hours': flight_time,
+                                        'flight_time_display': f"{hours}h {minutes}m",
+                                        'routing': 'Estimated',
+                                        'data_source': 'fallback_estimate'
+                                    })
+
                                 combined_data = {**weather_data, **flight_info}
                                 flight_results.append(combined_data)
 
@@ -1321,6 +1351,10 @@ Criteria: {parsed_query.additional_criteria}
                                 if flight_info.get('flight_time_display'):
                                     agent_data += f"   📍 Route: {flight_info['origin']} → {city_name}\n"
                                     agent_data += f"   🕐 Duration: {flight_info['flight_time_display']}, Distance: {flight_info['distance_km']:.0f}km\n"
+                                    agent_data += f"   🛬 Airports: {flight_info.get('origin_airport', 'N/A')} → {flight_info.get('dest_airport', 'N/A')}\n"
+                                else:
+                                    agent_data += f"   📍 Route: {flight_info['origin']} → {city_name}\n"
+                                    agent_data += f"   🕐 Distance: {flight_info['distance_km']:.0f}km\n"
                                     agent_data += f"   🛬 Airports: {flight_info.get('origin_airport', 'N/A')} → {flight_info.get('dest_airport', 'N/A')}\n"
 
                                 # Display FR24 API status and data
@@ -1413,7 +1447,7 @@ Criteria: {parsed_query.additional_criteria}
 
                     if flight_results:
                         avg_temp = sum(d['temp_avg'] for d in flight_results) / len(flight_results)
-                        avg_flight_time = sum(d['flight_time_hours'] for d in flight_results) / len(flight_results)
+                        avg_flight_time = sum(d.get('flight_time_hours', 8.0) for d in flight_results) / len(flight_results)
 
                         # Calculate how many destinations meet temperature criteria
                         meeting_temp_criteria = sum(1 for d in flight_results
@@ -1444,18 +1478,26 @@ Criteria: {parsed_query.additional_criteria}
                         "climate_alerts": climate_alerts,
                         "parsed_query": asdict(parsed_query),
                         "research_success": True,
-                        "climate_analysis_enabled": True
+                        "climate_analysis_enabled": True,
+                        "total_cities_processed": len(cities),
+                        "successful_weather_calls": successful_forecasts,
+                        "fr24_successful_calls": fr24_successful_calls,
+                        "fr24_failed_calls": fr24_failed_calls
                     }
 
                 except Exception as e:
+                    import traceback
+                    error_details = traceback.format_exc()
                     agent_data += f"\n❌ Enhanced research failed: {str(e)}\n"
+                    agent_data += f"📋 Error details: {error_details[-500:]}\n"  # Last 500 chars of traceback
                     metadata = {
                         "weather_results": [],
                         "flight_results": [],
                         "climate_alerts": [],
                         "parsed_query": asdict(parsed_query),
                         "research_success": False,
-                        "error": str(e)
+                        "error": str(e),
+                        "error_details": error_details
                     }
 
             elif role == AgentRole.ANALYZER:
@@ -1493,7 +1535,8 @@ Criteria: {parsed_query.additional_criteria}
                                 temp_score = 10 if meets_temp else max(0, 10 - abs(dest['temp_avg'] - temp_target) * 2)
 
                                 # Enhanced flight scoring with FR24 data
-                                base_flight_score = max(0, 10 - (dest['flight_time_hours'] / 15))
+                                flight_time_hours = dest.get('flight_time_hours', 8.0)  # Default fallback
+                                base_flight_score = max(0, 10 - (flight_time_hours / 15))
 
                                 # FR24 enhancement bonus
                                 fr24_bonus = 0
@@ -1622,7 +1665,7 @@ Criteria: {parsed_query.additional_criteria}
                                     climate_indicator = " ⚡"  # Climate concern
 
                                 agent_data += f"{i}. {status} **{city_name}**{climate_indicator} (Score: {dest['overall_score']:.1f}/10)\n"
-                                agent_data += f"   🌡️ {dest['temp_avg']:.1f}°C | ✈️ {dest['flight_time_display']} | 💧 {dest['humidity']:.0f}%\n"
+                                agent_data += f"   🌡️ {dest['temp_avg']:.1f}°C | ✈️ {dest.get('flight_time_display', 'N/A')} | 💧 {dest['humidity']:.0f}%\n"
                                 agent_data += f"   📍 {dest['weather_desc']} | 🛫 {dest['routing']}\n"
 
                                 # Add climate context
@@ -1750,7 +1793,7 @@ Climate Context:
                             summary_data.append(f"""
 {i}. {city_name} - {status}{climate_note}
    Current Forecast: {dest['temp_avg']:.1f}°C (Target: {parsed_query.temperature_range[0]}-{parsed_query.temperature_range[1]}°C)
-   Flight: {dest['flight_time_display']} from {parsed_query.origin_city}
+   Flight: {dest.get('flight_time_display', 'N/A')} from {parsed_query.origin_city}
    Weather: {dest['weather_desc']}, Humidity: {dest['humidity']:.0f}%
    Climate Score: {dest.get('climate_score', 10):.1f}/10 | Overall Score: {dest['overall_score']:.1f}/10
    Climate Context: {dest.get('climate_deviation', {}).get('context', 'Normal seasonal conditions')}
@@ -2124,7 +2167,7 @@ def server(input, output, session):
     @reactive.event(input.example4)
     def load_example4():
         ui.update_text_area("user_query",
-                            value="Find European winter destinations with 5-15°C in 10 days, Toronto departure, flag any weather anomalies")
+                            value="Find cooler European destinations with 5-15°C in 10 days, Toronto departure, flag any weather anomalies")
 
     @reactive.Effect
     @reactive.event(input.example5)
