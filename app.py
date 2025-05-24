@@ -16,6 +16,7 @@ import re
 from dateutil.parser import parse as parse_date
 from dateutil.relativedelta import relativedelta
 import statistics
+import random
 
 # Load environment variables
 load_dotenv()
@@ -352,30 +353,41 @@ class AgenticAISystem:
         # Initialize enhanced climate analyzer
         self.climate_analyzer = EnhancedClimateAnalyzer(self.client)
 
+    def safe_get_temp_range(self, parsed_query: TravelQuery) -> tuple:
+        """Safely extract temperature range, with fallbacks"""
+        try:
+            temp_range = getattr(parsed_query, 'temperature_range', (20, 27))
+
+            if not isinstance(temp_range, (tuple, list)):
+                print(f"Warning: temperature_range is not tuple/list: {type(temp_range)}")
+                return (20, 27)
+
+            if len(temp_range) < 2:
+                print(f"Warning: temperature_range has < 2 elements: {temp_range}")
+                return (20, 27)
+
+            # Return first two elements as tuple
+            return (float(temp_range[0]), float(temp_range[1]))
+
+        except Exception as e:
+            print(f"Error accessing temperature_range: {e}")
+            return (20, 27)
+
     async def parse_travel_query(self, query: str) -> TravelQuery:
         """Use OpenAI to intelligently parse the travel query into structured data"""
+        print(f"DEBUG: Parsing query: {query}")
+
         try:
             system_prompt = """You are a travel query parser. Extract structured information from travel queries.
 
 Parse the query and return a JSON object with these fields:
 - regions: List of regions/countries to search (e.g., ["Europe", "South America", "Asia"])
 - forecast_date: A natural language date (e.g., "tomorrow", "next Wednesday", "in 2 weeks")
-- temperature_range: [min_temp, max_temp] in Celsius
+- temperature_range: [min_temp, max_temp] in Celsius (ALWAYS provide exactly 2 numbers)
 - origin_city: Where the person is traveling from (if not specified, use "Toronto")
 - additional_criteria: List of other requirements (e.g., ["morning flights", "direct flights", "under $500"])
 
-Important:
-- If no origin city is mentioned, default to "Toronto"
-- Convert "short flights" to specific criteria like "under 6 hours"
-- Be generous with temperature ranges if exact numbers aren't given
-- Use common region names: "Europe", "Asia", "South America", "North America", "Africa", "Australia"
-
-Examples:
-Query: "Find European destinations with 20-27°C tomorrow"
-Response: {"regions": ["Europe"], "forecast_date": "tomorrow", "temperature_range": [20, 27], "origin_city": "Toronto", "additional_criteria": []}
-
-Query: "South American cities with warm weather next Wednesday, morning flights from Toronto"
-Response: {"regions": ["South America"], "forecast_date": "next Wednesday", "temperature_range": [20, 30], "origin_city": "Toronto", "additional_criteria": ["morning flights"]}
+CRITICAL: temperature_range MUST always be exactly 2 numbers in an array!
 
 Return only valid JSON, no explanations."""
 
@@ -389,33 +401,100 @@ Return only valid JSON, no explanations."""
                 temperature=0.1
             )
 
-            parsed_data = json.loads(response.choices[0].message.content)
+            parsed_data = {}
+            try:
+                content = response.choices[0].message.content.strip()
+                print(f"DEBUG: OpenAI response: {content}")
+                parsed_data = json.loads(content)
+                print(f"DEBUG: Parsed data: {parsed_data}")
+            except json.JSONDecodeError as e:
+                print(f"JSON parsing failed: {e}, using fallback")
+                parsed_data = {}
 
-            # Parse the natural language date
-            forecast_date_parsed = self._parse_natural_date(parsed_data.get("forecast_date", "tomorrow"))
+            # ROBUST temperature range handling - this is the key fix
+            temp_range = parsed_data.get("temperature_range", [20, 27])
+            print(f"DEBUG: Initial temp_range: {temp_range} (type: {type(temp_range)})")
 
-            return TravelQuery(
+            # Handle various input types
+            if temp_range is None:
+                temp_range = [20, 27]
+            elif isinstance(temp_range, (int, float)):
+                # Single number - create range around it
+                temp_range = [temp_range - 3, temp_range + 3]
+            elif isinstance(temp_range, str):
+                # Try to parse string
+                try:
+                    temp_range = [float(x.strip()) for x in temp_range.split('-') if x.strip()]
+                    if len(temp_range) != 2:
+                        temp_range = [20, 27]
+                except:
+                    temp_range = [20, 27]
+            elif isinstance(temp_range, list):
+                # Handle list cases
+                if len(temp_range) == 0:
+                    temp_range = [20, 27]
+                elif len(temp_range) == 1:
+                    temp_range = [temp_range[0] - 3, temp_range[0] + 3]
+                elif len(temp_range) > 2:
+                    temp_range = temp_range[:2]
+                # If exactly 2, keep as is
+            else:
+                # Unknown type
+                temp_range = [20, 27]
+
+            # Ensure we have exactly 2 valid numbers
+            try:
+                temp_range = [float(temp_range[0]), float(temp_range[1])]
+                # Ensure logical order (min <= max)
+                if temp_range[0] > temp_range[1]:
+                    temp_range = [temp_range[1], temp_range[0]]
+            except (ValueError, TypeError, IndexError):
+                print(f"DEBUG: Failed to convert temp_range to numbers, using fallback")
+                temp_range = [20, 27]
+
+            print(f"DEBUG: Final temp_range: {temp_range}")
+
+            # Parse date safely
+            forecast_date_str = parsed_data.get("forecast_date", "tomorrow")
+            try:
+                forecast_date_parsed = self._parse_natural_date(forecast_date_str)
+            except Exception as e:
+                print(f"Date parsing failed: {e}, using tomorrow")
+                forecast_date_parsed = datetime.now() + timedelta(days=1)
+                forecast_date_str = "tomorrow"
+
+            # Create the TravelQuery object
+            result = TravelQuery(
                 regions=parsed_data.get("regions", ["Europe"]),
-                forecast_date=parsed_data.get("forecast_date", "tomorrow"),
+                forecast_date=forecast_date_str,
                 forecast_date_parsed=forecast_date_parsed,
-                temperature_range=tuple(parsed_data.get("temperature_range", [20, 27])),
+                temperature_range=tuple(temp_range),  # Convert to tuple - guaranteed 2 elements
                 origin_city=parsed_data.get("origin_city", "Toronto"),
                 additional_criteria=parsed_data.get("additional_criteria", []),
                 raw_query=query
             )
 
+            print(
+                f"DEBUG: Created TravelQuery with temp_range: {result.temperature_range} (type: {type(result.temperature_range)}, len: {len(result.temperature_range)})")
+            return result
+
         except Exception as e:
-            print(f"Query parsing failed: {e}")
-            # Fallback to simple parsing
-            return TravelQuery(
+            print(f"Query parsing completely failed: {e}")
+            import traceback
+            print(f"Full traceback: {traceback.format_exc()}")
+
+            # Ultra-safe fallback
+            result = TravelQuery(
                 regions=["Europe"],
                 forecast_date="tomorrow",
                 forecast_date_parsed=datetime.now() + timedelta(days=1),
-                temperature_range=(20, 27),
+                temperature_range=(20, 27),  # Hard-coded safe tuple
                 origin_city="Toronto",
                 additional_criteria=[],
                 raw_query=query
             )
+            print(f"DEBUG: Using fallback TravelQuery with temp_range: {result.temperature_range}")
+            return result
 
     def _parse_natural_date(self, date_str: str) -> datetime:
         """Parse natural language dates into datetime objects"""
@@ -469,8 +548,8 @@ Return only valid JSON, no explanations."""
         # Fallback to tomorrow
         return today + timedelta(days=1)
 
-    async def get_cities_for_regions(self, regions: List[str], max_cities_per_region: int = 8) -> List[Dict[str, str]]:
-        """Use OpenAI to generate appropriate cities for any region"""
+    async def get_cities_for_regions(self, regions: List[str], max_cities_per_region: int = 10) -> List[Dict[str, str]]:
+        """Use OpenAI to generate diverse cities for any region with better randomization"""
         try:
             all_cities = []
 
@@ -486,26 +565,41 @@ Return only valid JSON, no explanations."""
                 elif region.lower() in ["north america", "north american"]:
                     region = "North America"
 
-                system_prompt = f"""You are a travel expert. Generate a list of {max_cities_per_region} cities in {region} that:
-1. Have major international airports
-2. Are popular tourist or business destinations
-3. Have populations over 300,000
-4. Are geographically diverse across the region
-5. Are likely to have good weather infrastructure
+                # Enhanced prompt for better diversity
+                system_prompt = f"""You are a travel expert generating diverse cities in {region}. 
 
-Return ONLY a JSON list in this format:
-[{{"city": "Barcelona", "country": "Spain"}}, {{"city": "Rome", "country": "Italy"}}]
+IMPORTANT: Include a mix of:
+- 40% major tourist destinations (capitals, famous cities)
+- 30% secondary cities (regional centers, cultural hubs)
+- 20% emerging destinations (up-and-coming, lesser-known gems)
+- 10% unique/unusual destinations (interesting but still accessible)
 
-Focus on cities that travelers actually visit, not just largest cities."""
+Requirements for each city:
+1. Has international airport access (direct or via connections)
+2. Population over 200,000 OR significant tourist infrastructure
+3. Geographically diverse across the region
+4. Mix of different climates/altitudes within region
+5. Include some "hidden gems" that travelers might not immediately think of
+
+AVOID: Repeating the same obvious cities (Paris, London, Rome) unless they're genuinely the best options.
+
+Return EXACTLY {max_cities_per_region} cities in this JSON format:
+[{{"city": "Barcelona", "country": "Spain"}}, {{"city": "Porto", "country": "Portugal"}}]
+
+Focus on geographical and cultural diversity, not just population size."""
+
+                # Add randomization to the prompt
+                temperature = random.uniform(0.7, 0.9)  # Variable creativity
 
                 response = self.client.chat.completions.create(
                     model="gpt-4",
                     messages=[
                         {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": f"Generate {max_cities_per_region} diverse cities for {region}"}
+                        {"role": "user",
+                         "content": f"Generate {max_cities_per_region} diverse cities for {region}. Mix famous and lesser-known destinations. Be geographically diverse."}
                     ],
-                    max_tokens=400,
-                    temperature=0.7
+                    max_tokens=500,
+                    temperature=temperature  # Variable randomness
                 )
 
                 try:
@@ -517,15 +611,20 @@ Focus on cities that travelers actually visit, not just largest cities."""
                     print(f"Failed to parse cities for {region}")
                     continue
 
+            # Shuffle the final list for additional randomization
+            random.shuffle(all_cities)
             return all_cities
 
         except Exception as e:
             print(f"City generation failed: {e}")
-            # Fallback to a few well-known cities
+            # Enhanced fallback with more diverse cities
             return [
                 {"city": "Barcelona", "country": "Spain", "region": "Europe"},
-                {"city": "Vancouver", "country": "Canada", "region": "North America"},
-                {"city": "Sydney", "country": "Australia", "region": "Australia"}
+                {"city": "Porto", "country": "Portugal", "region": "Europe"},
+                {"city": "Krakow", "country": "Poland", "region": "Europe"},
+                {"city": "Bruges", "country": "Belgium", "region": "Europe"},
+                {"city": "Tallinn", "country": "Estonia", "region": "Europe"},
+                {"city": "Valencia", "country": "Spain", "region": "Europe"}
             ]
 
     async def get_city_coordinates(self, city: str, country: str) -> Optional[Dict[str, float]]:
@@ -1144,13 +1243,79 @@ Return only valid JSON, no explanations."""
         r = 6371  # Earth's radius in km
         return c * r
 
+    async def generate_weather_appropriate_itinerary(self, city_data: Dict[str, Any], days: int = 4) -> str:
+        """Generate weather-appropriate 4-day itinerary for a destination"""
+        try:
+            city_name = city_data['city'].split(',')[0].strip()
+            country_name = city_data['city'].split(',')[1].strip() if ',' in city_data['city'] else ""
+            temp_avg = city_data['temp_avg']
+            weather_desc = city_data['weather_desc']
+            humidity = city_data.get('humidity', 60)
+
+            # Climate context
+            climate_context = ""
+            if 'climate_deviation' in city_data:
+                deviation = city_data['climate_deviation']
+                if deviation['severity'] != 'normal':
+                    climate_context = f" Note: Weather is {deviation['severity']} - {deviation['context']}"
+
+            system_prompt = f"""You are an expert travel itinerary planner specializing in weather-appropriate activities.
+
+Create a detailed {days}-day itinerary for {city_name}, {country_name} considering the specific weather conditions.
+
+Weather Context:
+- Temperature: {temp_avg:.1f}°C
+- Conditions: {weather_desc}
+- Humidity: {humidity}%{climate_context}
+
+Your itinerary should:
+1. Match activities to weather (indoor/outdoor balance)
+2. Include specific recommendations for weather gear/clothing
+3. Suggest best times of day for outdoor activities
+4. Include backup indoor options for each day
+5. Consider comfort levels for walking/sightseeing
+6. Include local weather-appropriate experiences (e.g., hot weather = parks/fountains, cool weather = museums/cafes)
+
+Format as:
+**DAY 1: [Theme]**
+- Morning (9-12): [Activity] - [Weather consideration]
+- Afternoon (12-17): [Activity] - [Weather consideration]  
+- Evening (17-21): [Activity] - [Weather consideration]
+- Weather Gear: [Specific recommendations]
+- Backup Plan: [Indoor alternative]
+
+Focus on realistic, enjoyable activities that work well in these specific weather conditions."""
+
+            response = self.client.chat.completions.create(
+                model="gpt-4",
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user",
+                     "content": f"Create a {days}-day weather-appropriate itinerary for {city_name}, {country_name}"}
+                ],
+                max_tokens=800,
+                temperature=0.7
+            )
+
+            return response.choices[0].message.content
+
+        except Exception as e:
+            return f"**ITINERARY GENERATION FAILED**\n\nError: {str(e)}\n\nFallback: Consider weather conditions ({city_data.get('temp_avg', 20):.1f}°C, {city_data.get('weather_desc', 'variable')}) when planning activities. Pack appropriately and have indoor backup plans."
+
     async def call_agent(self, role: AgentRole, parsed_query: TravelQuery, context: str = "") -> AgentMessage:
         """Enhanced autonomous agents with climate intelligence"""
         tools_used = []
+        metadata = {}  # Initialize metadata for all agents
+        agent_data = ""  # Initialize agent_data
 
         try:
             if role == AgentRole.PLANNER:
-                # Planner creates a strategy based on the parsed query
+                # Use safe temperature range access
+                temp_min, temp_max = self.safe_get_temp_range(parsed_query)
+
+                # Initialize metadata
+                metadata = {}
+
                 system_prompt = """You are a strategic planning agent for travel research with climate intelligence. 
 Given a parsed travel query, create a specific action plan for gathering data.
 
@@ -1164,12 +1329,12 @@ Consider:
 Be specific about the steps and reasoning."""
 
                 query_summary = f"""
-Query: {parsed_query.raw_query}
-Regions: {parsed_query.regions}
-Date: {parsed_query.forecast_date} ({parsed_query.forecast_date_parsed.strftime('%Y-%m-%d')})
-Temperature: {parsed_query.temperature_range[0]}-{parsed_query.temperature_range[1]}°C
-Origin: {parsed_query.origin_city}
-Criteria: {parsed_query.additional_criteria}
+Query: {getattr(parsed_query, 'raw_query', 'Unknown query')}
+Regions: {', '.join(getattr(parsed_query, 'regions', ['Europe']))}
+Date: {getattr(parsed_query, 'forecast_date', 'tomorrow')} ({getattr(parsed_query, 'forecast_date_parsed', datetime.now()).strftime('%Y-%m-%d')})
+Temperature: {temp_min}-{temp_max}°C
+Origin: {getattr(parsed_query, 'origin_city', 'Toronto')}
+Criteria: {', '.join(getattr(parsed_query, 'additional_criteria', []))}
 """
 
                 response = self.client.chat.completions.create(
@@ -1191,14 +1356,16 @@ Criteria: {parsed_query.additional_criteria}
                 agent_data += f"📋 **Query Analysis:**\n"
                 agent_data += f"   - Regions: {', '.join(parsed_query.regions)}\n"
                 agent_data += f"   - Date: {parsed_query.forecast_date} ({parsed_query.forecast_date_parsed.strftime('%Y-%m-%d')})\n"
-                agent_data += f"   - Temperature: {parsed_query.temperature_range[0]}-{parsed_query.temperature_range[1]}°C\n"
+
+                temp_min, temp_max = self.safe_get_temp_range(parsed_query)
+                agent_data += f"   - Temperature: {temp_min}-{temp_max}°C\n"
                 agent_data += f"   - Origin: {parsed_query.origin_city}\n\n"
                 metadata = {}
 
                 try:
-                    # Step 1: Get cities for the specified regions
-                    cities = await self.get_cities_for_regions(parsed_query.regions, 6)
-                    agent_data += f"✅ Generated {len(cities)} cities across {len(parsed_query.regions)} regions\n"
+                    # Step 1: Get diverse cities for the specified regions (increased from 6 to 12)
+                    cities = await self.get_cities_for_regions(parsed_query.regions, 12)
+                    agent_data += f"✅ Generated {len(cities)} diverse cities across {len(parsed_query.regions)} regions\n"
                     tools_used.append("ai_city_generation")
 
                     # Step 2: Enhanced weather data with climate analysis
@@ -1279,10 +1446,6 @@ Criteria: {parsed_query.additional_criteria}
                                         else:
                                             agent_data += f"   ✅ Typical seasonal weather\n"
 
-                                        # Add traveler impact for significant deviations
-                                        if severity in ['significant', 'extreme'] and deviation.get('traveler_impact'):
-                                            agent_data += f"   💡 Travel Impact: {deviation['traveler_impact'][:80]}...\n"
-
                                     agent_data += f"\n"
                                 else:
                                     agent_data += f"   ❌ Weather forecast failed: {weather_result.error[:60]}\n"
@@ -1352,70 +1515,20 @@ Criteria: {parsed_query.additional_criteria}
                                     agent_data += f"   📍 Route: {flight_info['origin']} → {city_name}\n"
                                     agent_data += f"   🕐 Duration: {flight_info['flight_time_display']}, Distance: {flight_info['distance_km']:.0f}km\n"
                                     agent_data += f"   🛬 Airports: {flight_info.get('origin_airport', 'N/A')} → {flight_info.get('dest_airport', 'N/A')}\n"
-                                else:
-                                    agent_data += f"   📍 Route: {flight_info['origin']} → {city_name}\n"
-                                    agent_data += f"   🕐 Distance: {flight_info['distance_km']:.0f}km\n"
-                                    agent_data += f"   🛬 Airports: {flight_info.get('origin_airport', 'N/A')} → {flight_info.get('dest_airport', 'N/A')}\n"
 
-                                # Display FR24 API status and data
+                                # Display FR24 API status
                                 api_status = flight_info.get('api_status', 'unknown')
-                                agent_data += f"   📡 FR24 API Status: {api_status}\n"
+                                agent_data += f"   📡 FR24 Status: {api_status}\n"
 
                                 if flight_info.get('fr24_data_available'):
                                     fr24_successful_calls += 1
                                     agent_data += f"   ✅ **REAL FLIGHT DATA RETRIEVED**\n"
-
-                                    # Display raw FR24 API response summary
-                                    fr24_raw = flight_info.get('fr24_raw_response', {})
-                                    if fr24_raw.get('raw_data'):
-                                        raw_data = fr24_raw['raw_data']
-                                        result_count = len(raw_data.get('results', []))
-                                        agent_data += f"   📊 FR24 Raw Results: {result_count} entries found\n"
-
-                                        # Show sample of raw data structure
-                                        if result_count > 0:
-                                            sample_result = raw_data['results'][0] if raw_data.get('results') else {}
-                                            agent_data += f"   📋 Sample API Response: {str(sample_result)[:100]}...\n"
-
-                                    # Display parsed flight data
-                                    parsed_data = flight_info.get('fr24_parsed_data', {})
-                                    if parsed_data.get('parsed'):
-                                        agent_data += f"   ✈️ Total Flights Found: {parsed_data.get('total_flights_found', 0)}\n"
-                                        airlines = parsed_data.get('airlines', [])
-                                        if airlines:
-                                            agent_data += f"   🏢 Airlines: {', '.join(airlines[:3])}{'...' if len(airlines) > 3 else ''}\n"
-
-                                    # Display recommended flights
-                                    recommendations = flight_info.get('recommended_flights', [])
-                                    if recommendations:
-                                        agent_data += f"   🏆 **TOP FLIGHT RECOMMENDATIONS:**\n"
-                                        for i, rec in enumerate(recommendations[:3], 1):
-                                            if 'error' not in rec:
-                                                agent_data += f"      {i}. {rec['airline']} {rec['flight_number']}\n"
-                                                agent_data += f"         Duration: {rec['duration_display']}, Score: {rec['overall_score']:.1f}/10\n"
-                                                agent_data += f"         Reliability: {rec['reliability_score']}/10, Aircraft: {rec['aircraft']}\n"
-                                            else:
-                                                agent_data += f"      ❌ Recommendation error: {rec['error']}\n"
-                                    else:
-                                        agent_data += f"   ⚠️ No flight recommendations generated\n"
-
-                                    # Display schedule data if available
-                                    schedule_data = flight_info.get('fr24_schedule_data')
-                                    if schedule_data and schedule_data.get('success'):
-                                        agent_data += f"   📅 Schedule data also retrieved from FR24\n"
-
                                 else:
                                     fr24_failed_calls += 1
                                     if api_status == "no_fr24_key":
                                         agent_data += f"   ⚠️ Using geographic estimates (no FR24 API key)\n"
-                                    elif "missing_airports" in api_status:
-                                        agent_data += f"   ⚠️ Using geographic estimates (airport codes not found)\n"
                                     else:
-                                        agent_data += f"   ❌ FR24 API failed, using geographic estimates\n"
-
-                                    # Show fallback data
-                                    if flight_info.get('routing'):
-                                        agent_data += f"   📍 Estimated: {flight_info['routing']}\n"
+                                        agent_data += f"   ❌ Using geographic estimates\n"
 
                                 agent_data += f"\n"
                             else:
@@ -1426,33 +1539,29 @@ Criteria: {parsed_query.additional_criteria}
                             fr24_failed_calls += 1
                             continue
 
-                    # FR24 API Summary
+                    # Enhanced research summary with climate insights
                     agent_data += f"✅ Flight analysis complete for {len(flight_results)} destinations\n"
                     if self.flightradar24_key:
                         agent_data += f"📡 **FR24 API SUMMARY:**\n"
                         agent_data += f"   - Successful API calls: {fr24_successful_calls}\n"
                         agent_data += f"   - Failed/fallback calls: {fr24_failed_calls}\n"
-                        agent_data += f"   - Real flight data coverage: {fr24_successful_calls}/{fr24_successful_calls + fr24_failed_calls} destinations\n"
                     else:
                         agent_data += f"📡 All flight data estimated (FR24 API not configured)\n"
 
-                    tools_used.extend(["fr24_api_calls", "flight_recommendations", "airline_analysis"])
-
-                    # Enhanced research summary with climate insights
                     agent_data += f"\n**ENHANCED RESEARCH SUMMARY:**\n"
                     agent_data += f"- Target date: {parsed_query.forecast_date_parsed.strftime('%A, %B %d, %Y')}\n"
-                    agent_data += f"- Temperature criteria: {parsed_query.temperature_range[0]}-{parsed_query.temperature_range[1]}°C\n"
+                    agent_data += f"- Temperature criteria: {temp_min}-{temp_max}°C\n"
                     agent_data += f"- Origin: {parsed_query.origin_city}\n"
                     agent_data += f"- Complete data: {len(flight_results)} destinations\n"
 
                     if flight_results:
                         avg_temp = sum(d['temp_avg'] for d in flight_results) / len(flight_results)
-                        avg_flight_time = sum(d.get('flight_time_hours', 8.0) for d in flight_results) / len(flight_results)
+                        avg_flight_time = sum(d.get('flight_time_hours', 8.0) for d in flight_results) / len(
+                            flight_results)
 
                         # Calculate how many destinations meet temperature criteria
                         meeting_temp_criteria = sum(1 for d in flight_results
-                                                    if parsed_query.temperature_range[0] <= d['temp_avg'] <=
-                                                    parsed_query.temperature_range[1])
+                                                    if temp_min <= d['temp_avg'] <= temp_max)
 
                         agent_data += f"- Meeting temperature criteria: {meeting_temp_criteria}/{len(flight_results)}\n"
                         agent_data += f"- Average temperature: {avg_temp:.1f}°C\n"
@@ -1464,10 +1573,6 @@ Criteria: {parsed_query.additional_criteria}
                             significant_count = sum(1 for alert in climate_alerts if alert['severity'] == 'significant')
 
                             agent_data += f"- Climate anomalies: {len(climate_alerts)} destinations with unusual weather\n"
-                            if extreme_count > 0:
-                                agent_data += f"  • {extreme_count} with extreme deviations from normal\n"
-                            if significant_count > 0:
-                                agent_data += f"  • {significant_count} with significant deviations from normal\n"
                         else:
                             agent_data += f"- Climate status: All destinations showing normal seasonal patterns\n"
 
@@ -1501,7 +1606,7 @@ Criteria: {parsed_query.additional_criteria}
                     }
 
             elif role == AgentRole.ANALYZER:
-                # Enhanced Analyzer with climate deviation analysis
+                # Enhanced Analyzer with climate deviation analysis and improved scoring
                 metadata = {}
 
                 # Get research data from previous agent
@@ -1513,11 +1618,11 @@ Criteria: {parsed_query.additional_criteria}
                     climate_alerts = research_data.get('climate_alerts', [])
 
                     if flight_results:
-                        temp_min, temp_max = parsed_query.temperature_range
+                        temp_min, temp_max = self.safe_get_temp_range(parsed_query)
 
                         agent_data = "**ENHANCED ANALYSIS IN PROGRESS:**\n\n"
 
-                        # Analyze each destination with climate context
+                        # Analyze each destination with improved scoring
                         analyzed_destinations = []
                         meeting_criteria = 0
                         climate_advantages = []
@@ -1530,32 +1635,34 @@ Criteria: {parsed_query.additional_criteria}
                                 if meets_temp:
                                     meeting_criteria += 1
 
-                                # Enhanced scoring with climate factors and FR24 data
+                                # IMPROVED SCORING SYSTEM - addressing Dublin issue
                                 temp_target = (temp_min + temp_max) / 2
-                                temp_score = 10 if meets_temp else max(0, 10 - abs(dest['temp_avg'] - temp_target) * 2)
+                                temp_distance = abs(dest['temp_avg'] - temp_target)
 
-                                # Enhanced flight scoring with FR24 data
-                                flight_time_hours = dest.get('flight_time_hours', 8.0)  # Default fallback
-                                base_flight_score = max(0, 10 - (flight_time_hours / 15))
+                                # More nuanced temperature scoring
+                                if meets_temp:
+                                    # Perfect match gets 10, gradually decrease as we move away from center
+                                    temp_range_size = temp_max - temp_min
+                                    temp_score = 10 - (temp_distance / (temp_range_size / 2)) * 2
+                                    temp_score = max(8, temp_score)  # Minimum of 8 if within range
+                                else:
+                                    # Outside range - score based on how close
+                                    temp_score = max(0, 8 - temp_distance * 1.5)
+
+                                # Enhanced flight scoring
+                                flight_time_hours = dest.get('flight_time_hours', 8.0)
+                                base_flight_score = max(0, 10 - (flight_time_hours / 12))  # More generous
 
                                 # FR24 enhancement bonus
-                                fr24_bonus = 0
-                                flight_reliability_score = 5  # Default
-
-                                if dest.get('fr24_data_available') and dest.get('recommended_flights'):
-                                    fr24_bonus = 1  # Bonus for having real flight data
-                                    # Use the best flight recommendation score
-                                    best_flight = dest['recommended_flights'][0] if dest['recommended_flights'] else {}
-                                    if 'overall_score' in best_flight:
-                                        flight_reliability_score = best_flight['overall_score']
-
+                                fr24_bonus = 1 if dest.get('fr24_data_available') else 0
                                 flight_score = min(10, base_flight_score + fr24_bonus)
 
-                                humidity_score = 10 if 40 <= dest['humidity'] <= 70 else max(0, 10 - abs(
-                                    dest['humidity'] - 55) / 5)
+                                # More realistic humidity scoring
+                                humidity_score = 10 if 30 <= dest['humidity'] <= 80 else max(6, 10 - abs(
+                                    dest['humidity'] - 55) / 10)
 
-                                # NEW: Climate stability score
-                                climate_score = 10  # Default for normal conditions
+                                # Climate stability score (less punitive)
+                                climate_score = 10
                                 climate_bonus = 0
                                 climate_penalty = 0
 
@@ -1565,38 +1672,37 @@ Criteria: {parsed_query.additional_criteria}
                                     temp_dev = deviation['temp_deviation_c']
 
                                     if severity == 'extreme':
-                                        climate_penalty = 3
-                                        climate_score = 4
+                                        climate_penalty = 2  # Reduced from 3
+                                        climate_score = 6  # Improved from 4
                                     elif severity == 'significant':
-                                        climate_penalty = 1.5
-                                        climate_score = 6
+                                        climate_penalty = 1  # Reduced from 1.5
+                                        climate_score = 7  # Improved from 6
                                     elif severity == 'slight':
-                                        climate_score = 8
+                                        climate_score = 8.5  # Improved from 8
                                     else:  # normal
-                                        climate_bonus = 0.5  # Reward predictable weather
+                                        climate_bonus = 0.3  # Slight reward for predictable weather
 
                                     # Special handling for favorable unusual weather
                                     if meets_temp and temp_dev > 0 and severity in ['slight', 'significant']:
-                                        # Warmer than normal but still in range = bonus
-                                        climate_bonus += 1
+                                        climate_bonus += 0.5
                                         climate_advantages.append({
                                             'city': dest['city'].split(',')[0],
                                             'advantage': f"Unusually warm (+{temp_dev:.1f}°C) but perfect for your criteria"
                                         })
-                                    elif not meets_temp and severity in ['significant', 'extreme']:
-                                        climate_concerns.append({
-                                            'city': dest['city'].split(',')[0],
-                                            'concern': deviation.get('traveler_impact', 'Unusual weather conditions'),
-                                            'severity': severity
-                                        })
 
-                                # Enhanced overall score with climate weighting and FR24 data
+                                # REBALANCED overall score - less weight on flight time, more on temperature match
+                                flight_reliability_score = 7  # Default
+                                if dest.get('recommended_flights'):
+                                    best_flight = dest['recommended_flights'][0] if dest['recommended_flights'] else {}
+                                    if 'overall_score' in best_flight:
+                                        flight_reliability_score = best_flight['overall_score']
+
                                 overall_score = (
-                                        (temp_score * 0.30) +
-                                        (flight_score * 0.25) +
-                                        (humidity_score * 0.15) +
-                                        (climate_score * 0.20) +
-                                        (flight_reliability_score * 0.10) +
+                                        (temp_score * 0.40) +  # Increased from 0.30
+                                        (flight_score * 0.20) +  # Decreased from 0.25
+                                        (humidity_score * 0.10) +  # Decreased from 0.15
+                                        (climate_score * 0.20) +  # Same
+                                        (flight_reliability_score * 0.10) +  # Same
                                         climate_bonus - climate_penalty
                                 )
 
@@ -1611,7 +1717,7 @@ Criteria: {parsed_query.additional_criteria}
                                     'fr24_bonus': fr24_bonus,
                                     'climate_bonus': climate_bonus,
                                     'climate_penalty': climate_penalty,
-                                    'overall_score': min(10, max(0, overall_score))  # Clamp to 0-10
+                                    'overall_score': min(10, max(0, overall_score))
                                 })
 
                             except Exception as e:
@@ -1626,117 +1732,45 @@ Criteria: {parsed_query.additional_criteria}
                         agent_data += f"- Climate alerts: {len(climate_alerts)} destinations with unusual weather\n"
                         agent_data += f"- Analysis date: {parsed_query.forecast_date} ({parsed_query.forecast_date_parsed.strftime('%Y-%m-%d')})\n\n"
 
-                        # Climate intelligence summary
-                        if climate_alerts:
-                            agent_data += f"🌡️ **CLIMATE INTELLIGENCE:**\n"
-                            extreme_alerts = [a for a in climate_alerts if a['severity'] == 'extreme']
-                            significant_alerts = [a for a in climate_alerts if a['severity'] == 'significant']
-
-                            if extreme_alerts:
-                                agent_data += f"   🚨 {len(extreme_alerts)} destinations with extreme weather deviations\n"
-                            if significant_alerts:
-                                agent_data += f"   ⚠️ {len(significant_alerts)} destinations with significant weather deviations\n"
-
-                            agent_data += f"   ✅ {len(analyzed_destinations) - len(climate_alerts)} destinations with normal seasonal weather\n\n"
-
-                        if climate_advantages:
-                            agent_data += f"🎯 **CLIMATE ADVANTAGES:**\n"
-                            for adv in climate_advantages[:3]:
-                                agent_data += f"   ✨ {adv['city']}: {adv['advantage']}\n"
-                            agent_data += f"\n"
-
-                        if climate_concerns:
-                            agent_data += f"⚠️ **CLIMATE CONCERNS:**\n"
-                            for concern in climate_concerns[:3]:
-                                agent_data += f"   🌡️ {concern['city']}: {concern['concern']} ({concern['severity']})\n"
-                            agent_data += f"\n"
-
                         if analyzed_destinations:
-                            agent_data += "🏆 **TOP DESTINATIONS (Climate-Enhanced Scoring):**\n"
-                            for i, dest in enumerate(analyzed_destinations[:5], 1):
+                            agent_data += "🏆 **TOP DESTINATIONS (Enhanced Climate-Aware Scoring):**\n"
+                            for i, dest in enumerate(analyzed_destinations[:8], 1):  # Show top 8 instead of 5
                                 city_name = dest['city'].split(',')[0]
                                 status = "✅" if dest['meets_criteria'] else "⚠️"
 
-                                # Climate indicator
-                                climate_indicator = ""
+                                # Enhanced status indicators
+                                indicators = []
                                 if dest.get('climate_bonus', 0) > 0:
-                                    climate_indicator = " 🌟"  # Climate bonus
-                                elif dest.get('climate_penalty', 0) > 0:
-                                    climate_indicator = " ⚡"  # Climate concern
+                                    indicators.append("🌟")  # Climate bonus
+                                if dest.get('climate_penalty', 0) > 0:
+                                    indicators.append("⚡")  # Climate concern
+                                if dest.get('fr24_data_available'):
+                                    indicators.append("✈️")  # Real flight data
 
-                                agent_data += f"{i}. {status} **{city_name}**{climate_indicator} (Score: {dest['overall_score']:.1f}/10)\n"
+                                indicator_str = "".join(indicators)
+
+                                agent_data += f"{i}. {status} **{city_name}**{indicator_str} (Score: {dest['overall_score']:.1f}/10)\n"
                                 agent_data += f"   🌡️ {dest['temp_avg']:.1f}°C | ✈️ {dest.get('flight_time_display', 'N/A')} | 💧 {dest['humidity']:.0f}%\n"
-                                agent_data += f"   📍 {dest['weather_desc']} | 🛫 {dest['routing']}\n"
+                                agent_data += f"   📍 {dest['weather_desc']} | 🛫 {dest.get('routing', 'N/A')}\n"
 
-                                # Add climate context
-                                if 'climate_deviation' in dest:
-                                    deviation = dest['climate_deviation']
-                                    if deviation['severity'] != 'normal':
-                                        agent_data += f"   🌡️ Climate: {deviation['context'][:60]}...\n"
+                                # Detailed scoring breakdown for top 3
+                                if i <= 3:
+                                    agent_data += f"   📊 Scores: Temp={dest['temp_score']:.1f} Flight={dest['flight_score']:.1f} Climate={dest['climate_score']:.1f}\n"
 
                                 agent_data += f"\n"
 
-                            # Enhanced AI insights with climate data
-                            top_cities = [d['city'].split(',')[0] for d in analyzed_destinations[:3]]
-                            climate_summary = {
-                                'total_alerts': len(climate_alerts),
-                                'climate_advantages': len(climate_advantages),
-                                'climate_concerns': len(climate_concerns),
-                                'avg_climate_score': sum(
-                                    d.get('climate_score', 10) for d in analyzed_destinations[:3]) / 3
-                            }
-
-                            system_prompt = """You are an advanced travel analysis agent with climate intelligence. Provide insights on travel destinations considering both immediate travel factors and climate context.
-
-Focus on:
-- How climate deviations affect travel value
-- Whether unusual weather is good or bad for the traveler's goals
-- Optimal timing and backup planning
-- Climate-aware travel recommendations
-
-Be specific about the climate implications for this traveler."""
-
-                            analysis_context = f"""
-Enhanced Analysis Results:
-- Query: {parsed_query.raw_query}
-- Criteria: {temp_min}-{temp_max}°C on {parsed_query.forecast_date}
-- Destinations meeting temperature: {meeting_criteria}/{len(analyzed_destinations)}
-- Top 3 destinations: {', '.join(top_cities)}
-- Climate alerts: {climate_summary['total_alerts']} total
-- Climate advantages: {climate_summary['climate_advantages']} destinations
-- Climate concerns: {climate_summary['climate_concerns']} destinations
-- Average climate stability score: {climate_summary['avg_climate_score']:.1f}/10
-
-Climate Context:
-{climate_advantages[:2] if climate_advantages else 'No significant climate advantages'}
-{climate_concerns[:2] if climate_concerns else 'No major climate concerns'}
-"""
-
-                            try:
-                                response = self.client.chat.completions.create(
-                                    model="gpt-4",
-                                    messages=[
-                                        {"role": "system", "content": system_prompt},
-                                        {"role": "user",
-                                         "content": f"Provide climate-enhanced analysis: {analysis_context}"}
-                                    ],
-                                    max_tokens=400,
-                                    temperature=0.7
-                                )
-
-                                agent_data += "🧠 **CLIMATE-ENHANCED AI INSIGHTS:**\n"
-                                agent_data += response.choices[0].message.content
-
-                            except Exception as e:
-                                agent_data += f"⚠️ AI climate analysis unavailable: {str(e)[:50]}"
-
                             metadata = {
                                 "analyzed_destinations": analyzed_destinations,
-                                "climate_summary": climate_summary,
+                                "climate_summary": {
+                                    'total_alerts': len(climate_alerts),
+                                    'climate_advantages': len(climate_advantages),
+                                    'climate_concerns': len(climate_concerns),
+                                    'meeting_criteria': meeting_criteria
+                                },
                                 "climate_advantages": climate_advantages,
                                 "climate_concerns": climate_concerns
                             }
-                            tools_used = ["enhanced_data_analysis", "climate_intelligence", "deviation_scoring",
+                            tools_used = ["enhanced_data_analysis", "climate_intelligence", "improved_scoring",
                                           "ai_climate_insights"]
                         else:
                             agent_data += "❌ No valid destinations to analyze"
@@ -1752,7 +1786,7 @@ Climate Context:
                     tools_used = []
 
             elif role == AgentRole.SYNTHESIZER:
-                # Enhanced Synthesizer with climate-aware recommendations
+                # Enhanced Synthesizer with itinerary generation
                 metadata = {}
 
                 # Get analysis data
@@ -1761,174 +1795,119 @@ Climate Context:
                 if analysis_messages and analysis_messages[-1].metadata.get('analyzed_destinations'):
                     destinations = analysis_messages[-1].metadata['analyzed_destinations']
                     climate_summary = analysis_messages[-1].metadata.get('climate_summary', {})
-                    climate_advantages = analysis_messages[-1].metadata.get('climate_advantages', [])
-                    climate_concerns = analysis_messages[-1].metadata.get('climate_concerns', [])
 
-                    agent_data = "**CLIMATE-ENHANCED RECOMMENDATIONS:**\n\n"
+                    agent_data = "**CLIMATE-ENHANCED RECOMMENDATIONS & ITINERARIES:**\n\n"
 
                     if destinations:
-                        top_destinations = destinations[:5]
+                        top_destinations = destinations[:3]
 
-                        # Prepare enhanced data for AI synthesis
-                        summary_data = []
+                        # Enhanced recommendations with itineraries for top 2
+                        agent_data += "🏆 **TOP RECOMMENDATIONS:**\n\n"
+
                         for i, dest in enumerate(top_destinations, 1):
                             city_name = dest['city'].split(',')[0]
-                            status = "✅ MEETS CRITERIA" if dest['meets_criteria'] else "⚠️ CLOSE MATCH"
+                            country_name = dest['city'].split(',')[1].strip() if ',' in dest['city'] else ""
+                            status = "🎯" if dest['meets_criteria'] else "⭐"
+
+                            # Enhanced indicators
+                            indicators = []
+                            if dest.get('climate_bonus', 0) > 0:
+                                indicators.append("🌟")
+                            if dest.get('fr24_data_available'):
+                                indicators.append("✈️")
+
+                            indicator_str = " ".join(indicators)
+
+                            agent_data += f"**{i}. {status} {city_name}, {country_name}** {indicator_str}\n"
+                            agent_data += f"   🌡️ Weather: {dest['temp_avg']:.1f}°C, {dest['weather_desc']}\n"
+                            agent_data += f"   ✈️ Flight: {dest.get('flight_time_display', 'N/A')} ({dest.get('routing', 'N/A')})\n"
+                            agent_data += f"   📊 Overall Score: {dest['overall_score']:.1f}/10\n"
 
                             # Climate context
-                            climate_note = ""
                             if 'climate_deviation' in dest:
                                 deviation = dest['climate_deviation']
-                                if deviation['severity'] in ['significant', 'extreme']:
-                                    temp_dev = deviation['temp_deviation_c']
-                                    if temp_dev > 0:
-                                        climate_note = f" | 🔥 {temp_dev:+.1f}°C warmer than normal"
-                                    else:
-                                        climate_note = f" | 🧊 {temp_dev:+.1f}°C cooler than normal"
-                                elif deviation['severity'] == 'slight':
-                                    climate_note = " | 📊 Slightly off seasonal average"
-                                else:
-                                    climate_note = " | ✅ Typical seasonal weather"
+                                if deviation['severity'] != 'normal':
+                                    agent_data += f"   🌡️ Climate Note: {deviation['context'][:80]}...\n"
 
-                            summary_data.append(f"""
-{i}. {city_name} - {status}{climate_note}
-   Current Forecast: {dest['temp_avg']:.1f}°C (Target: {parsed_query.temperature_range[0]}-{parsed_query.temperature_range[1]}°C)
-   Flight: {dest.get('flight_time_display', 'N/A')} from {parsed_query.origin_city}
-   Weather: {dest['weather_desc']}, Humidity: {dest['humidity']:.0f}%
-   Climate Score: {dest.get('climate_score', 10):.1f}/10 | Overall Score: {dest['overall_score']:.1f}/10
-   Climate Context: {dest.get('climate_deviation', {}).get('context', 'Normal seasonal conditions')}
-""")
+                            # Generate 4-day itinerary for top 2 destinations
+                            if i <= 2:
+                                agent_data += f"\n   🗓️ **4-DAY WEATHER-APPROPRIATE ITINERARY:**\n"
+                                try:
+                                    itinerary = await self.generate_weather_appropriate_itinerary(dest, 4)
+                                    # Indent the itinerary
+                                    indented_itinerary = '\n'.join(f"   {line}" for line in itinerary.split('\n'))
+                                    agent_data += f"{indented_itinerary}\n"
+                                except Exception as e:
+                                    agent_data += f"   ❌ Itinerary generation failed: {str(e)[:100]}\n"
 
-                        destinations_summary = "\n".join(summary_data)
+                            agent_data += f"\n"
 
-                        # Climate intelligence summary for AI
-                        climate_context = f"""
-Climate Intelligence Summary:
-- Total destinations analyzed: {len(destinations)}
-- Climate alerts: {climate_summary.get('total_alerts', 0)}
-- Destinations with climate advantages: {len(climate_advantages)}
-- Destinations with climate concerns: {len(climate_concerns)}
-- Average climate stability: {climate_summary.get('avg_climate_score', 10):.1f}/10
+                        # Enhanced booking strategy
+                        agent_data += f"🎯 **CLIMATE-SMART BOOKING STRATEGY:**\n\n"
+                        agent_data += f"**Target Details:**\n"
+                        temp_min, temp_max = self.safe_get_temp_range(parsed_query)
+                        agent_data += f"- Date: {parsed_query.forecast_date_parsed.strftime('%A, %B %d, %Y')}\n"
+                        agent_data += f"- Temperature Range: {temp_min}-{temp_max}°C\n"
+                        agent_data += f"- Departure: {parsed_query.origin_city}\n"
 
-Key Climate Insights:
-{chr(10).join([f"+ {adv['city']}: {adv['advantage']}" for adv in climate_advantages[:2]])}
-{chr(10).join([f"- {concern['city']}: {concern['concern']}" for concern in climate_concerns[:2]])}
-"""
+                        meeting_criteria = climate_summary.get('meeting_criteria', 0)
+                        total_analyzed = len(destinations)
 
-                        # Enhanced AI synthesis with climate intelligence
-                        system_prompt = """You are an advanced travel recommendation agent with climate intelligence capabilities. Create personalized, climate-aware travel recommendations.
-
-Provide:
-1. Top 3 destinations with climate-enhanced reasoning
-2. Climate timing strategy and booking advice
-3. Weather contingency planning
-4. Climate advantages and how to maximize them
-5. Specific packing and preparation advice based on climate deviations
-
-Be specific about climate benefits/risks and actionable about climate-related travel decisions."""
-
-                        try:
-                            response = self.client.chat.completions.create(
-                                model="gpt-4",
-                                messages=[
-                                    {"role": "system", "content": system_prompt},
-                                    {"role": "user", "content": f"""Create climate-enhanced travel recommendations:
-
-Query: {parsed_query.raw_query}
-Travel Date: {parsed_query.forecast_date}
-Origin: {parsed_query.origin_city}
-
-{climate_context}
-
-Analyzed Destinations:
-{destinations_summary}"""}
-                                ],
-                                max_tokens=700,
-                                temperature=0.8
-                            )
-
-                            agent_data += response.choices[0].message.content
-
-                        except Exception as e:
-                            # Enhanced fallback with climate context
-                            agent_data += "🏆 **CLIMATE-ENHANCED TOP RECOMMENDATIONS:**\n\n"
-
-                            for i, dest in enumerate(top_destinations[:3], 1):
-                                city_name = dest['city'].split(',')[0]
-                                country_name = dest['city'].split(',')[1].strip() if ',' in dest['city'] else ""
-                                status_emoji = "🎯" if dest['meets_criteria'] else "⭐"
-
-                                # Climate emoji
-                                climate_emoji = "🌟" if dest.get('climate_bonus', 0) > 0 else "⚡" if dest.get(
-                                    'climate_penalty', 0) > 0 else "🌤️"
-
-                                # FR24 emoji
-                                fr24_emoji = "✈️" if dest.get('fr24_data_available') else "📍"
-
-                                agent_data += f"**{i}. {status_emoji} {city_name}, {country_name}** {climate_emoji}{fr24_emoji}\n"
-                                agent_data += f"   🌡️ Weather: {dest['temp_avg']:.1f}°C, {dest['weather_desc']}\n"
-                                agent_data += f"   ✈️ Flight: {dest.get('flight_time_display', 'N/A')} ({dest.get('routing', 'N/A')})\n"
-
-                                # Enhanced flight recommendations from FR24
-                                if dest.get('fr24_data_available') and dest.get('recommended_flights'):
-                                    agent_data += f"   🏆 **RECOMMENDED FLIGHTS (FR24 Data):**\n"
-                                    for j, flight in enumerate(dest['recommended_flights'][:2], 1):
-                                        if 'error' not in flight:
-                                            agent_data += f"      {j}. {flight['airline']} {flight['flight_number']}\n"
-                                            agent_data += f"         Duration: {flight['duration_display']}, Reliability: {flight['reliability_score']}/10\n"
-                                            if flight.get('departure_time') and flight.get('arrival_time'):
-                                                agent_data += f"         Times: {flight['departure_time']} → {flight['arrival_time']}\n"
-                                elif dest.get('api_status'):
-                                    agent_data += f"   📡 Flight Data: {dest['api_status'].replace('_', ' ').title()}\n"
-
-                                # Climate-specific recommendation
-                                if 'climate_deviation' in dest:
-                                    deviation = dest['climate_deviation']
-                                    agent_data += f"   🌡️ Climate: {deviation['context']}\n"
-                                    if deviation.get('traveler_impact'):
-                                        agent_data += f"   💡 Travel Tip: {deviation['traveler_impact']}\n"
-
-                                agent_data += f"   📊 Overall Score: {dest['overall_score']:.1f}/10\n"
-                                agent_data += f"      (Climate: {dest.get('climate_score', 10):.1f}/10, Flight: {dest.get('flight_score', 0):.1f}/10, FR24: {dest.get('flight_reliability_score', 0):.1f}/10)\n\n"
-
-                        # Enhanced booking strategy with climate considerations
-                        agent_data += f"\n\n🎯 **CLIMATE-SMART BOOKING STRATEGY:**\n"
-                        agent_data += f"- **Target Date**: {parsed_query.forecast_date_parsed.strftime('%A, %B %d, %Y')}\n"
-                        agent_data += f"- **Weather Criteria**: {parsed_query.temperature_range[0]}-{parsed_query.temperature_range[1]}°C\n"
+                        agent_data += f"\n**Analysis Summary:**\n"
+                        agent_data += f"- Destinations analyzed: {total_analyzed}\n"
+                        agent_data += f"- Meeting temperature criteria: {meeting_criteria}/{total_analyzed}\n"
 
                         if climate_summary.get('total_alerts', 0) > 0:
-                            agent_data += f"- **Climate Alerts**: {climate_summary['total_alerts']} destinations with unusual weather\n"
-                            agent_data += f"- **Recommendation**: Book flexible tickets, monitor weather 1 week before travel\n"
+                            agent_data += f"- Climate alerts: {climate_summary['total_alerts']} destinations with unusual weather\n"
+                            agent_data += f"- **Booking Tip**: Consider flexible tickets, monitor weather 1 week before travel\n"
                         else:
-                            agent_data += f"- **Climate Status**: Stable seasonal weather expected\n"
+                            agent_data += f"- Climate status: Stable seasonal weather expected\n"
                             agent_data += f"- **Booking Confidence**: High - typical seasonal patterns predicted\n"
 
-                        if climate_advantages:
-                            agent_data += f"- **Climate Opportunity**: {len(climate_advantages)} destinations with favorable unusual weather\n"
-
-                        agent_data += f"- **Departure**: {parsed_query.origin_city}\n"
-
                         if parsed_query.additional_criteria:
-                            agent_data += f"- **Special Requirements**: {', '.join(parsed_query.additional_criteria)}\n"
+                            agent_data += f"- Special requirements: {', '.join(parsed_query.additional_criteria)}\n"
 
-                        tools_used = ["climate_enhanced_synthesis", "ai_climate_personalization",
-                                      "weather_contingency_planning"]
+                        # Why these destinations ranked well
+                        agent_data += f"\n**Why These Destinations Ranked Well:**\n"
+                        for i, dest in enumerate(top_destinations[:2], 1):
+                            city_name = dest['city'].split(',')[0]
+                            reasons = []
+
+                            if dest['meets_criteria']:
+                                temp_min, temp_max = self.safe_get_temp_range(parsed_query)
+                                reasons.append(
+                                    f"Perfect temperature match ({dest['temp_avg']:.1f}°C within {temp_min}-{temp_max}°C)")
+
+                            if dest.get('fr24_data_available'):
+                                reasons.append("Real flight data available")
+
+                            if dest.get('climate_bonus', 0) > 0:
+                                reasons.append("Favorable climate conditions")
+
+                            if dest.get('flight_time_hours', 0) < 10:
+                                reasons.append("Reasonable flight time")
+
+                            agent_data += f"{i}. **{city_name}**: {'; '.join(reasons)}\n"
+
+                        tools_used = ["climate_enhanced_synthesis", "weather_appropriate_itineraries",
+                                      "enhanced_recommendations"]
                         metadata = {
                             "final_recommendations": top_destinations[:3],
                             "climate_summary": climate_summary,
                             "booking_date": parsed_query.forecast_date_parsed.strftime('%Y-%m-%d'),
                             "total_options": len(destinations),
-                            "climate_enhanced": True
+                            "climate_enhanced": True,
+                            "itineraries_generated": 2
                         }
                     else:
-                        agent_data = "❌ No suitable destinations found. Climate-enhanced suggestions:\n"
-                        agent_data += "- Consider adjusting temperature range (current weather patterns unusual)\n"
+                        agent_data = "❌ No suitable destinations found. Enhanced suggestions:\n"
+                        agent_data += "- Consider adjusting temperature range (current weather patterns may be unusual)\n"
                         agent_data += "- Try alternative dates (climate deviations may be temporary)\n"
                         agent_data += "- Expand regions (some areas may have better climate stability)\n"
                         tools_used = ["climate_aware_fallback"]
                         metadata = {}
                 else:
-                    agent_data = "❌ No analysis data available for climate-enhanced recommendations"
+                    agent_data = "❌ No analysis data available for enhanced recommendations"
                     tools_used = ["error_handling"]
                     metadata = {}
 
@@ -1937,19 +1916,23 @@ Analyzed Destinations:
                 content=agent_data,
                 timestamp=datetime.now(),
                 tools_used=tools_used,
-                metadata=metadata if 'metadata' in locals() else {}
+                metadata=metadata
             )
 
             self.conversation_history.append(message)
             return message
 
         except Exception as e:
+            import traceback
+            error_details = traceback.format_exc()
+            print(f"Agent {role.value} error: {error_details}")
+
             error_message = AgentMessage(
                 agent_role=role,
-                content=f"❌ Agent {role.value} encountered error: {str(e)}",
+                content=f"❌ Agent {role.value} encountered error: {str(e)}\n\nDebug info:\n{error_details[-300:]}",
                 timestamp=datetime.now(),
                 tools_used=[],
-                metadata={"error": True}
+                metadata={"error": True, "error_details": error_details}
             )
             self.conversation_history.append(error_message)
             return error_message
@@ -1978,7 +1961,7 @@ Analyzed Destinations:
         analysis_msg = await self.call_agent(AgentRole.ANALYZER, parsed_query, research_msg.content)
         workflow_messages.append(analysis_msg)
 
-        # Synthesis (with climate-aware recommendations)
+        # Synthesis (with climate-aware recommendations and itineraries)
         synthesis_msg = await self.call_agent(AgentRole.SYNTHESIZER, parsed_query, analysis_msg.content)
         workflow_messages.append(synthesis_msg)
 
@@ -1991,8 +1974,9 @@ ai_system = AgenticAISystem(OPENAI_KEY, OPENWEATHER_KEY, FLIGHTRADAR24_KEY) if O
 # Enhanced Shiny UI
 app_ui = ui.page_fillable(
     ui.h1("🤖 Enhanced Agentic AI Travel System", class_="text-center mb-4"),
-    ui.p("🌡️ Climate Intelligence • ✈️ Flight Analysis • 🎯 Smart Recommendations",
-         class_="text-center text-muted mb-4"),
+    ui.p(
+        "🌡️ Climate Intelligence • ✈️ Flight Analysis • 🎯 Smart Recommendations • 🗓️ Weather-Appropriate Itineraries",
+        class_="text-center text-muted mb-4"),
 
     ui.layout_sidebar(
         ui.sidebar(
@@ -2002,23 +1986,24 @@ app_ui = ui.page_fillable(
             ui.hr(),
 
             ui.h4("Enhanced Examples"),
-            ui.input_action_button("example1", "🌍 Europe: Climate + Weather", class_="btn-outline-info btn-sm mb-1"),
+            ui.input_action_button("example1", "🌍 Europe: Climate Analysis", class_="btn-outline-info btn-sm mb-1"),
             ui.input_action_button("example2", "🏝️ Asia: Warm + Morning Flights",
                                    class_="btn-outline-info btn-sm mb-1"),
             ui.input_action_button("example3", "🌮 Mexico: Beach Weather", class_="btn-outline-info btn-sm mb-1"),
-            ui.input_action_button("example4", "❄️ Cooler Europe: Mild Weather", class_="btn-outline-info btn-sm mb-1"),
+            ui.input_action_button("example4", "❄️ Dublin Test: Cooler Weather", class_="btn-outline-info btn-sm mb-1"),
             ui.input_action_button("example5", "🌡️ Climate Anomaly Test", class_="btn-outline-info btn-sm mb-1"),
             ui.input_action_button("example6", "✈️ FR24 Flight Data Test", class_="btn-outline-info btn-sm mb-1"),
+            ui.input_action_button("example7", "🗺️ Diverse Cities Test", class_="btn-outline-info btn-sm mb-1"),
 
             ui.hr(),
             ui.h5("Enhanced Features"),
             ui.p("✅ Historical Climate Baselines", style="font-size: 0.85em; margin: 2px 0;"),
             ui.p("✅ Weather Deviation Analysis", style="font-size: 0.85em; margin: 2px 0;"),
-            ui.p("✅ Climate-Enhanced Scoring", style="font-size: 0.85em; margin: 2px 0;"),
-            ui.p("✅ FlightRadar24 Real Flight Data", style="font-size: 0.85em; margin: 2px 0;"),
-            ui.p("✅ Flight Recommendations & Reliability", style="font-size: 0.85em; margin: 2px 0;"),
-            ui.p("✅ Toronto Default Origin", style="font-size: 0.85em; margin: 2px 0;"),
-            ui.p("✅ Multiple Real APIs", style="font-size: 0.85em; margin: 2px 0;"),
+            ui.p("✅ Improved Scoring Algorithm", style="font-size: 0.85em; margin: 2px 0;"),
+            ui.p("✅ Diverse City Generation", style="font-size: 0.85em; margin: 2px 0;"),
+            ui.p("✅ 4-Day Weather Itineraries", style="font-size: 0.85em; margin: 2px 0;"),
+            ui.p("✅ FlightRadar24 Real Data", style="font-size: 0.85em; margin: 2px 0;"),
+            ui.p("✅ Enhanced Error Handling", style="font-size: 0.85em; margin: 2px 0;"),
 
             width=300
         ),
@@ -2028,7 +2013,7 @@ app_ui = ui.page_fillable(
                 ui.input_text_area(
                     "user_query",
                     "Enter your enhanced travel query:",
-                    placeholder="e.g., 'Find warm Asian destinations for next Friday with climate analysis' or 'European cities with mild weather in 3 weeks, check for unusual conditions'",
+                    placeholder="e.g., 'Find cooler European destinations with 5-15°C in 10 days from Toronto' or 'Diverse Asian cities with warm weather next Friday, include itineraries'",
                     rows=3,
                     width="100%"
                 ),
@@ -2112,6 +2097,13 @@ app_ui = ui.page_fillable(
             text-align: left;
             font-size: 0.85em;
         }
+        .itinerary-section {
+            background: rgba(255,255,255,0.8);
+            padding: 15px;
+            border-radius: 8px;
+            margin: 10px 0;
+            border-left: 4px solid #17a2b8;
+        }
     """)
 )
 
@@ -2122,12 +2114,6 @@ def server(input, output, session):
         else "⚠️ Please connect OpenAI API key for enhanced features"
     )
     conversation_messages = reactive.Value([])
-
-    @reactive.Effect
-    @reactive.event(input.example6)
-    def load_example6():
-        ui.update_text_area("user_query",
-                            value="European destinations tomorrow with FlightRadar24 flight analysis, show real flight data and recommendations")
 
     @reactive.Effect
     @reactive.event(input.connect)
@@ -2176,6 +2162,18 @@ def server(input, output, session):
                             value="South American cities next month, check for climate deviations from seasonal norms, warm weather preferred")
 
     @reactive.Effect
+    @reactive.event(input.example6)
+    def load_example6():
+        ui.update_text_area("user_query",
+                            value="European destinations tomorrow with FlightRadar24 flight analysis, show real flight data and recommendations")
+
+    @reactive.Effect
+    @reactive.event(input.example7)
+    def load_example7():
+        ui.update_text_area("user_query",
+                            value="Diverse European cities in 2 weeks, mix of famous and hidden gems, include 4-day weather-appropriate itineraries")
+
+    @reactive.Effect
     @reactive.event(input.run_workflow)
     async def run_agentic_workflow():
         global ai_system
@@ -2188,15 +2186,18 @@ def server(input, output, session):
             workflow_status.set("⚠️ Please enter a query")
             return
 
-        workflow_status.set("🔄 Enhanced AI agents working with climate intelligence...")
+        workflow_status.set("🔄 Enhanced AI agents working with climate intelligence & itineraries...")
         conversation_messages.set([])
 
         try:
             messages = await ai_system.run_agentic_workflow(input.user_query())
             conversation_messages.set(messages)
-            workflow_status.set("✅ Enhanced AI workflow completed with climate analysis")
+            workflow_status.set("✅ Enhanced AI workflow completed with climate analysis & itineraries")
         except Exception as e:
+            import traceback
+            error_details = traceback.format_exc()
             workflow_status.set(f"❌ Enhanced workflow failed: {str(e)}")
+            print(f"Workflow error details: {error_details}")
 
     @output
     @render.ui
@@ -2211,17 +2212,19 @@ def server(input, output, session):
         messages = conversation_messages.get()
         if not messages:
             return ui.div(
-                ui.h4("🌡️ Enhanced Climate Intelligence Ready"),
+                ui.h4("🌡️ Enhanced Climate Intelligence & Itinerary System Ready"),
                 ui.p("This enhanced system provides:", class_="mb-2"),
                 ui.div(
                     ui.p("• Historical climate baselines for any city/month", class_="text-muted mb-1"),
-                    ui.p("• Weather deviation analysis (normal → extreme)", class_="text-muted mb-1"),
-                    ui.p("• Climate-enhanced destination scoring", class_="text-muted mb-1"),
-                    ui.p("• Traveler impact insights for unusual weather", class_="text-muted mb-1"),
-                    ui.p("• Climate-aware booking recommendations", class_="text-muted mb-1"),
+                    ui.p("• Weather deviation analysis with traveler impact", class_="text-muted mb-1"),
+                    ui.p("• Improved scoring algorithm (addresses Dublin ranking)", class_="text-muted mb-1"),
+                    ui.p("• Diverse city generation (famous + hidden gems)", class_="text-muted mb-1"),
+                    ui.p("• 4-day weather-appropriate itineraries", class_="text-muted mb-1"),
+                    ui.p("• Enhanced error handling & debugging", class_="text-muted mb-1"),
                 ),
-                ui.p("Try any travel query with any region, date, or criteria!",
-                     class_="text-primary text-center mt-3"),
+                ui.p(
+                    "Try any travel query - the system now generates diverse destinations and weather-specific itineraries!",
+                    class_="text-primary text-center mt-3"),
                 style="padding: 40px;"
             )
 
@@ -2240,6 +2243,17 @@ def server(input, output, session):
             if msg.tools_used:
                 tools_display = f"Tools: {', '.join(msg.tools_used)}"
 
+            # Enhanced content formatting for itineraries
+            content = msg.content
+            if "**DAY" in content:
+                # Format itinerary sections with better styling
+                content = content.replace("**DAY", "\n🗓️ **DAY")
+                content = content.replace("- Morning", "\n   🌅 Morning")
+                content = content.replace("- Afternoon", "\n   ☀️ Afternoon")
+                content = content.replace("- Evening", "\n   🌆 Evening")
+                content = content.replace("- Weather Gear:", "\n   🎒 Weather Gear:")
+                content = content.replace("- Backup Plan:", "\n   🏠 Backup Plan:")
+
             elements.append(
                 ui.div(
                     ui.div(
@@ -2247,7 +2261,7 @@ def server(input, output, session):
                         ui.span(tools_display, class_="tools-used") if tools_display else "",
                         class_="agent-header"
                     ),
-                    ui.div(msg.content, style="white-space: pre-wrap; line-height: 1.6;"),
+                    ui.div(content, style="white-space: pre-wrap; line-height: 1.6;"),
                     ui.div(f"⏱️ {msg.timestamp.strftime('%H:%M:%S')}", class_="timestamp mt-2"),
                     class_=f"agent-message {info['class']}"
                 )
