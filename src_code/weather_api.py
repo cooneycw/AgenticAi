@@ -1,11 +1,12 @@
 # src_code/weather_api.py
-"""Fixed Weather API Integration
+"""Fixed Weather API Integration - ENHANCED ERROR HANDLING
 
 This module fixes the weather API issues by:
 1. Using OpenWeatherMap API (paid service) as primary
 2. Fixing Open-Meteo API parameters as fallback
 3. Better error handling and parameter validation
 4. Proper temperature range handling
+5. Enhanced timeout and retry mechanisms
 """
 from __future__ import annotations
 
@@ -29,24 +30,36 @@ async def get_weather_data_enhanced(
 ) -> TaskResult:
     """Enhanced weather data retrieval using multiple APIs with fallbacks."""
 
+    # Input validation
+    if not (-90 <= lat <= 90):
+        return TaskResult(False, None, f"Invalid latitude: {lat}")
+    if not (-180 <= lon <= 180):
+        return TaskResult(False, None, f"Invalid longitude: {lon}")
+
     # Try OpenWeatherMap first (paid service)
     if openweather_key:
         print(f"DEBUG: Trying OpenWeatherMap API for {city_name}")
-        owm_result = await _get_openweathermap_data(lat, lon, target_date, openweather_key)
-        if owm_result.success:
-            print(f"DEBUG: OpenWeatherMap success for {city_name}")
-            return owm_result
-        else:
-            print(f"DEBUG: OpenWeatherMap failed for {city_name}: {owm_result.error}")
+        try:
+            owm_result = await _get_openweathermap_data(lat, lon, target_date, openweather_key)
+            if owm_result.success:
+                print(f"DEBUG: OpenWeatherMap success for {city_name}")
+                return owm_result
+            else:
+                print(f"DEBUG: OpenWeatherMap failed for {city_name}: {owm_result.error}")
+        except Exception as e:
+            print(f"DEBUG: OpenWeatherMap exception for {city_name}: {e}")
 
     # Fallback to fixed Open-Meteo
     print(f"DEBUG: Trying fixed Open-Meteo API for {city_name}")
-    meteo_result = await _get_openmeteo_fixed(lat, lon, target_date)
-    if meteo_result.success:
-        print(f"DEBUG: Open-Meteo success for {city_name}")
-        return meteo_result
-    else:
-        print(f"DEBUG: Open-Meteo failed for {city_name}: {meteo_result.error}")
+    try:
+        meteo_result = await _get_openmeteo_fixed(lat, lon, target_date)
+        if meteo_result.success:
+            print(f"DEBUG: Open-Meteo success for {city_name}")
+            return meteo_result
+        else:
+            print(f"DEBUG: Open-Meteo failed for {city_name}: {meteo_result.error}")
+    except Exception as e:
+        print(f"DEBUG: Open-Meteo exception for {city_name}: {e}")
 
     # Final fallback with seasonal estimates
     print(f"DEBUG: Using seasonal estimate for {city_name}")
@@ -85,15 +98,26 @@ async def _get_openweathermap_data(
                 'units': 'metric'
             }
 
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url, params=params, timeout=15) as response:
+        timeout = aiohttp.ClientTimeout(total=20)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.get(url, params=params) as response:
                 if response.status == 200:
                     data = await response.json()
                     return _parse_openweathermap_response(data, target_date, days_ahead)
+                elif response.status == 401:
+                    error_text = "Invalid API key"
+                    return TaskResult(False, None, f"OpenWeatherMap auth error: {error_text}")
+                elif response.status == 429:
+                    error_text = "Rate limit exceeded"
+                    return TaskResult(False, None, f"OpenWeatherMap rate limit: {error_text}")
                 else:
                     error_text = await response.text()
                     return TaskResult(False, None, f"OpenWeatherMap HTTP {response.status}: {error_text[:100]}")
 
+    except asyncio.TimeoutError:
+        return TaskResult(False, None, "OpenWeatherMap timeout")
+    except aiohttp.ClientError as e:
+        return TaskResult(False, None, f"OpenWeatherMap connection error: {str(e)}")
     except Exception as e:
         return TaskResult(False, None, f"OpenWeatherMap error: {str(e)}")
 
@@ -108,44 +132,66 @@ def _parse_openweathermap_response(data: Dict[str, Any], target_date: datetime, 
             # Find data for target date
             day_data = []
             for item in data['list']:
-                item_date = datetime.fromtimestamp(item['dt']).strftime('%Y-%m-%d')
-                if item_date == target_day:
-                    day_data.append(item)
+                try:
+                    item_date = datetime.fromtimestamp(item['dt']).strftime('%Y-%m-%d')
+                    if item_date == target_day:
+                        day_data.append(item)
+                except (KeyError, ValueError, OSError):
+                    continue
 
             if not day_data:
                 return TaskResult(False, None, "No data for target date")
 
             # Calculate daily averages
-            temps = [item['main']['temp'] for item in day_data]
-            humidities = [item['main']['humidity'] for item in day_data]
+            try:
+                temps = [item['main']['temp'] for item in day_data if 'main' in item and 'temp' in item['main']]
+                humidities = [item['main']['humidity'] for item in day_data if
+                              'main' in item and 'humidity' in item['main']]
 
-            temp_max = max(temps)
-            temp_min = min(temps)
-            temp_avg = sum(temps) / len(temps)
-            humidity = sum(humidities) / len(humidities)
+                if not temps:
+                    return TaskResult(False, None, "No temperature data found")
 
-            # Get weather description
-            weather_desc = day_data[0]['weather'][0]['description']
+                temp_max = max(temps)
+                temp_min = min(temps)
+                temp_avg = sum(temps) / len(temps)
+                humidity = sum(humidities) / len(humidities) if humidities else 60
+
+                # Get weather description
+                weather_desc = "Variable conditions"
+                if day_data[0].get('weather') and len(day_data[0]['weather']) > 0:
+                    weather_desc = day_data[0]['weather'][0].get('description', 'Variable conditions')
+
+            except (KeyError, ZeroDivisionError, TypeError):
+                return TaskResult(False, None, "Error processing temperature data")
 
         elif 'daily' in data:
             # One Call API format
-            if days_ahead < len(data['daily']):
-                day = data['daily'][days_ahead]
-                temp_max = day['temp']['max']
-                temp_min = day['temp']['min']
-                temp_avg = (temp_max + temp_min) / 2
-                humidity = day['humidity']
-                weather_desc = day['weather'][0]['description']
-            else:
-                return TaskResult(False, None, "Date beyond forecast range")
+            try:
+                if days_ahead < len(data['daily']):
+                    day = data['daily'][days_ahead]
+                    if 'temp' not in day or 'humidity' not in day:
+                        return TaskResult(False, None, "Missing required fields in daily data")
+
+                    temp_max = float(day['temp']['max'])
+                    temp_min = float(day['temp']['min'])
+                    temp_avg = (temp_max + temp_min) / 2
+                    humidity = float(day['humidity'])
+
+                    weather_desc = "Variable conditions"
+                    if day.get('weather') and len(day['weather']) > 0:
+                        weather_desc = day['weather'][0].get('description', 'Variable conditions')
+                else:
+                    return TaskResult(False, None, "Date beyond forecast range")
+            except (KeyError, ValueError, TypeError, IndexError):
+                return TaskResult(False, None, "Error processing daily forecast data")
         else:
             return TaskResult(False, None, "Unexpected API response format")
 
         return TaskResult(True, {
-            "temp_max": temp_max,
-            "temp_min": temp_min,
-            "temp_avg": temp_avg,
-            "humidity": humidity,
+            "temp_max": round(temp_max, 1),
+            "temp_min": round(temp_min, 1),
+            "temp_avg": round(temp_avg, 1),
+            "humidity": round(humidity, 0),
             "weather_desc": weather_desc.title(),
             "data_source": "openweathermap_paid"
         })
@@ -175,8 +221,9 @@ async def _get_openmeteo_fixed(lat: float, lon: float, target_date: datetime) ->
 
         print(f"DEBUG: Fixed Open-Meteo URL: {url}")
 
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url, timeout=15) as response:
+        timeout = aiohttp.ClientTimeout(total=20)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.get(url) as response:
                 print(f"DEBUG: Open-Meteo status: {response.status}")
 
                 if response.status != 200:
@@ -196,25 +243,33 @@ async def _get_openmeteo_fixed(lat: float, lon: float, target_date: datetime) ->
         if missing:
             return TaskResult(False, None, f"Missing fields: {missing}")
 
-        hi = daily["temperature_2m_max"][0]
-        lo = daily["temperature_2m_min"][0]
-        avg = (hi + lo) / 2
-        weather_code = daily.get("weather_code", [0])[0]
+        try:
+            hi = float(daily["temperature_2m_max"][0])
+            lo = float(daily["temperature_2m_min"][0])
+            avg = (hi + lo) / 2
+            weather_code = int(daily.get("weather_code", [0])[0])
 
-        # Estimate humidity based on weather code and location
-        humidity = _estimate_humidity_from_weather_code(weather_code, lat)
+            # Estimate humidity based on weather code and location
+            humidity = _estimate_humidity_from_weather_code(weather_code, lat)
 
-        weather_desc = _weather_code_to_description(weather_code)
+            weather_desc = _weather_code_to_description(weather_code)
 
-        return TaskResult(True, {
-            "temp_max": hi,
-            "temp_min": lo,
-            "temp_avg": avg,
-            "humidity": humidity,
-            "weather_desc": weather_desc,
-            "data_source": "open_meteo_fixed"
-        })
+            return TaskResult(True, {
+                "temp_max": round(hi, 1),
+                "temp_min": round(lo, 1),
+                "temp_avg": round(avg, 1),
+                "humidity": round(humidity, 0),
+                "weather_desc": weather_desc,
+                "data_source": "open_meteo_fixed"
+            })
 
+        except (ValueError, TypeError, IndexError) as e:
+            return TaskResult(False, None, f"Data conversion error: {str(e)}")
+
+    except asyncio.TimeoutError:
+        return TaskResult(False, None, "Open-Meteo timeout")
+    except aiohttp.ClientError as e:
+        return TaskResult(False, None, f"Open-Meteo connection error: {str(e)}")
     except Exception as e:
         print(f"DEBUG: Open-Meteo exception: {e}")
         return TaskResult(False, None, f"API error: {str(e)}")
@@ -222,58 +277,70 @@ async def _get_openmeteo_fixed(lat: float, lon: float, target_date: datetime) ->
 
 def _get_seasonal_fallback(lat: float, lon: float, target_date: datetime, city_name: str) -> TaskResult:
     """Generate seasonal weather estimate as final fallback."""
-    month = target_date.month
+    try:
+        month = target_date.month
 
-    # Rough seasonal estimates based on latitude and month
-    if abs(lat) < 23.5:  # Tropical
-        if month in [6, 7, 8, 9]:  # Wet season
-            temp_base = 28
-            humidity = 80
-            weather_desc = "Partly cloudy with showers"
-        else:  # Dry season
-            temp_base = 30
-            humidity = 65
-            weather_desc = "Mostly sunny"
-    elif abs(lat) < 35:  # Subtropical
-        if month in [12, 1, 2]:  # Winter
-            temp_base = 15
-            humidity = 70
-            weather_desc = "Cool and cloudy"
-        elif month in [6, 7, 8]:  # Summer
-            temp_base = 28
-            humidity = 60
-            weather_desc = "Warm and sunny"
-        else:  # Spring/Fall
-            temp_base = 22
-            humidity = 65
-            weather_desc = "Mild conditions"
-    else:  # Temperate
-        if month in [12, 1, 2]:  # Winter
-            temp_base = 5
-            humidity = 75
-            weather_desc = "Cold and overcast"
-        elif month in [6, 7, 8]:  # Summer
-            temp_base = 25
-            humidity = 60
-            weather_desc = "Warm and pleasant"
-        else:  # Spring/Fall
-            temp_base = 15
-            humidity = 70
-            weather_desc = "Cool and variable"
+        # Rough seasonal estimates based on latitude and month
+        if abs(lat) < 23.5:  # Tropical
+            if month in [6, 7, 8, 9]:  # Wet season
+                temp_base = 28
+                humidity = 80
+                weather_desc = "Partly cloudy with showers"
+            else:  # Dry season
+                temp_base = 30
+                humidity = 65
+                weather_desc = "Mostly sunny"
+        elif abs(lat) < 35:  # Subtropical
+            if month in [12, 1, 2]:  # Winter
+                temp_base = 15
+                humidity = 70
+                weather_desc = "Cool and cloudy"
+            elif month in [6, 7, 8]:  # Summer
+                temp_base = 28
+                humidity = 60
+                weather_desc = "Warm and sunny"
+            else:  # Spring/Fall
+                temp_base = 22
+                humidity = 65
+                weather_desc = "Mild conditions"
+        else:  # Temperate
+            if month in [12, 1, 2]:  # Winter
+                temp_base = 5
+                humidity = 75
+                weather_desc = "Cold and overcast"
+            elif month in [6, 7, 8]:  # Summer
+                temp_base = 25
+                humidity = 60
+                weather_desc = "Warm and pleasant"
+            else:  # Spring/Fall
+                temp_base = 15
+                humidity = 70
+                weather_desc = "Cool and variable"
 
-    # Add some randomness
-    import random
-    temp_var = random.uniform(-3, 3)
-    temp_avg = temp_base + temp_var
+        # Add some randomness
+        import random
+        temp_var = random.uniform(-3, 3)
+        temp_avg = temp_base + temp_var
 
-    return TaskResult(True, {
-        "temp_max": temp_avg + 4,
-        "temp_min": temp_avg - 4,
-        "temp_avg": temp_avg,
-        "humidity": humidity,
-        "weather_desc": weather_desc,
-        "data_source": "seasonal_fallback_estimate"
-    })
+        return TaskResult(True, {
+            "temp_max": round(temp_avg + 4, 1),
+            "temp_min": round(temp_avg - 4, 1),
+            "temp_avg": round(temp_avg, 1),
+            "humidity": round(humidity, 0),
+            "weather_desc": weather_desc,
+            "data_source": "seasonal_fallback_estimate"
+        })
+
+    except Exception as e:
+        # Ultimate fallback
+        return TaskResult(True, {
+            "temp_max": 20.0,
+            "temp_min": 10.0,
+            "temp_avg": 15.0,
+            "humidity": 60.0,
+            "weather_desc": "Variable conditions",
+            "data_source": "emergency_fallback"
+        })
 
 
 def _estimate_humidity_from_weather_code(code: int, lat: float) -> float:

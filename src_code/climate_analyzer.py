@@ -1,5 +1,5 @@
 # src_code/climate_analyzer.py
-"""Enhanced Climate & Weather Intelligence Layer - Phase 1 Upgrade
+"""Enhanced Climate & Weather Intelligence Layer - Phase 1 Upgrade - FIXED
 
 This significantly enhanced module provides comprehensive climate analysis:
 
@@ -12,16 +12,16 @@ This significantly enhanced module provides comprehensive climate analysis:
 4. **Robust Fallback Systems**: Multiple fallback layers for reliability
 5. **Climate Alerts**: Automatic flagging of unusual conditions
 
-Key enhancements over basic version:
-- Much more detailed historical baseline generation
-- Comprehensive deviation analysis with severity levels
-- AI-generated traveler impact assessments
-- Enhanced error handling and fallback mechanisms
-- Additional climate metadata (sunshine, records, reliability scores)
+FIXES:
+- Better JSON parsing with content extraction
+- More robust error handling for API failures
+- Improved fallback mechanisms
+- Better response validation
 """
 from __future__ import annotations
 
 import json
+import re
 from datetime import datetime
 from typing import Any, Dict, Optional
 
@@ -68,6 +68,50 @@ def _seasonal_fallback_temps(month: int, region_hint: str = "") -> tuple[float, 
         base_low += 1
 
     return base_high, base_low
+
+
+def _extract_json_from_response(response_text: str) -> Optional[Dict[str, Any]]:
+    """Extract JSON from AI response that might contain additional text."""
+    if not response_text or not response_text.strip():
+        return None
+
+    # Try direct parsing first
+    try:
+        return json.loads(response_text.strip())
+    except json.JSONDecodeError:
+        pass
+
+    # Look for JSON block in the response
+    json_patterns = [
+        r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}',  # Simple nested JSON
+        r'```json\s*(\{.*?\})\s*```',  # JSON in code blocks
+        r'```\s*(\{.*?\})\s*```',  # JSON in generic code blocks
+    ]
+
+    for pattern in json_patterns:
+        matches = re.findall(pattern, response_text, re.DOTALL)
+        for match in matches:
+            try:
+                return json.loads(match.strip())
+            except json.JSONDecodeError:
+                continue
+
+    # Try extracting the first complete JSON object
+    brace_count = 0
+    json_start = response_text.find('{')
+    if json_start >= 0:
+        for i, char in enumerate(response_text[json_start:], json_start):
+            if char == '{':
+                brace_count += 1
+            elif char == '}':
+                brace_count -= 1
+                if brace_count == 0:
+                    try:
+                        return json.loads(response_text[json_start:i + 1])
+                    except json.JSONDecodeError:
+                        break
+
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -127,7 +171,7 @@ class EnhancedClimateAnalyzer:
 historical weather data spanning 30+ years. Provide detailed, accurate climate 
 information for specific cities and months.
 
-Return a JSON object with these EXACT fields:
+CRITICAL: Return ONLY a valid JSON object with these EXACT fields:
 {
     "avg_temp_high": 23.5,
     "avg_temp_low": 16.2, 
@@ -144,35 +188,32 @@ Return a JSON object with these EXACT fields:
     "data_reliability": "high"
 }
 
-Base this on actual long-term climate patterns. Be precise and realistic.
-Focus on what travelers typically experience during this month."""
+Do NOT include any explanatory text before or after the JSON. Return ONLY the JSON object.
+Base this on actual long-term climate patterns. Be precise and realistic."""
 
         user_prompt = f"""Provide comprehensive historical climate baseline for {city}, {country} in {month_name}.
 
-Include:
-- 30-year temperature and humidity averages
-- Typical daily weather patterns for this specific month  
-- Climate zone (Mediterranean, Continental, Oceanic, etc.)
-- Record extremes for context
-- Average sunshine hours per day
-- What tourists and travelers typically experience
-- Seasonal tourism patterns and weather stability
-
-City: {city}, {country}
-Month: {month_name}"""
+Return ONLY the JSON object with all required fields. No additional text."""
 
         try:
             response = self._client.chat.completions.create(
-                model="gpt-4o-mini",  # Use GPT-4 for better climate knowledge
+                model="gpt-4o-mini",
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt}
                 ],
-                max_tokens=600,  # Increased for richer data
-                temperature=0.1  # Low temperature for factual accuracy
+                max_tokens=600,
+                temperature=0.1
             )
 
-            climate_data = json.loads(response.choices[0].message.content)
+            response_text = response.choices[0].message.content
+            print(f"DEBUG: Climate AI response for {city}: {response_text[:100]}...")
+
+            climate_data = _extract_json_from_response(response_text)
+
+            if not climate_data:
+                print(f"Climate AI returned invalid JSON for {city}: Could not extract JSON from response")
+                return self._enhanced_fallback_baseline(city, country, target_month)
 
             # Create enhanced baseline with validation
             baseline = ClimateBaseline(
@@ -199,11 +240,9 @@ Month: {month_name}"""
             # Validate and cache
             self._validate_baseline(baseline)
             self._climate_cache[cache_key] = baseline
+            print(f"DEBUG: Successfully generated climate baseline for {city}")
             return baseline
 
-        except json.JSONDecodeError as e:
-            print(f"Climate AI returned invalid JSON for {city}: {e}")
-            return self._enhanced_fallback_baseline(city, country, target_month)
         except Exception as e:
             print(f"Climate baseline lookup failed for {city}: {e}")
             return self._enhanced_fallback_baseline(city, country, target_month)
@@ -244,10 +283,18 @@ Month: {month_name}"""
             # Enhanced severity calculation
             severity = self._calculate_enhanced_severity(temp_deviation, humidity_deviation)
 
-            # Generate AI-powered contextual analysis
-            context_analysis = await self._generate_enhanced_context(
-                forecast, baseline, temp_deviation, humidity_deviation, severity
-            )
+            # Generate AI-powered contextual analysis with better error handling
+            try:
+                context_analysis = await self._generate_enhanced_context(
+                    forecast, baseline, temp_deviation, humidity_deviation, severity
+                )
+            except Exception as e:
+                print(f"Context generation failed: {e}")
+                context_analysis = {
+                    'context': f"Conditions {severity}, {temp_deviation:+.1f}°C from historical average",
+                    'impact': "Pack flexible clothing and monitor weather forecasts daily",
+                    'confidence': "low"
+                }
 
             return WeatherDeviation(
                 temperature_deviation_c=temp_deviation,
@@ -301,6 +348,7 @@ Month: {month_name}"""
         baseline.wind_speed_kmh = 12.0
         baseline.data_reliability = "low"
 
+        print(f"DEBUG: Using fallback baseline for {city}: {baseline.avg_temp_mean:.1f}°C")
         return baseline
 
     def _calculate_enhanced_severity(self, temp_dev: float, humidity_dev: float) -> str:
@@ -343,7 +391,7 @@ Month: {month_name}"""
             humidity_deviation: float,
             severity: str,
     ) -> Dict[str, str]:
-        """Generate enhanced AI-powered contextual analysis."""
+        """Generate enhanced AI-powered contextual analysis with better error handling."""
         try:
             city_name = baseline.city
             month_name = _month_name(baseline.month)
@@ -351,15 +399,14 @@ Month: {month_name}"""
             system_prompt = """You are an expert travel weather analyst. Explain weather 
 deviations from historical norms in practical, actionable terms for travelers.
 
-Provide a JSON response with exactly these fields:
+CRITICAL: Provide ONLY a valid JSON response with exactly these fields:
 {
     "context": "Brief explanation of the deviation and likely causes (max 100 chars)",
     "impact": "Specific advice for travelers - clothing, activities, comfort (max 150 chars)", 
     "confidence": "high/medium/low - based on data quality and deviation magnitude"
 }
 
-Be specific, practical, and traveler-focused. Mention if conditions are unusually 
-good or concerning for tourism. Keep responses concise but informative."""
+Return ONLY the JSON object. No additional text before or after."""
 
             deviation_summary = f"""Location: {city_name}
 Month: {month_name}
@@ -368,9 +415,7 @@ Current Forecast: {forecast.get('temp_avg', 0):.1f}°C, {forecast.get('humidity'
 Temperature Deviation: {temp_deviation:+.1f}°C from normal
 Humidity Deviation: {humidity_deviation:+.0f}% from normal
 Severity: {severity}
-Climate Zone: {baseline.climate_zone}
-Typical Patterns: {', '.join(baseline.typical_weather_patterns[:2])}
-Data Reliability: {getattr(baseline, 'data_reliability', 'moderate')}"""
+Climate Zone: {baseline.climate_zone}"""
 
             response = self._client.chat.completions.create(
                 model="gpt-4o-mini",
@@ -382,15 +427,20 @@ Data Reliability: {getattr(baseline, 'data_reliability', 'moderate')}"""
                 temperature=0.3
             )
 
-            try:
-                return json.loads(response.choices[0].message.content)
-            except json.JSONDecodeError:
-                # Graceful fallback if JSON parsing fails
-                content = response.choices[0].message.content
+            response_text = response.choices[0].message.content
+            context_data = _extract_json_from_response(response_text)
+
+            if context_data:
                 return {
-                    "context": f"Weather {severity} vs normal" + (
-                        f" ({temp_deviation:+.1f}°C)" if abs(temp_deviation) > 1 else ""),
-                    "impact": content[:150] if content else "Check current conditions before travel",
+                    "context": str(context_data.get("context", "Weather variation from normal"))[:100],
+                    "impact": str(context_data.get("impact", "Check current conditions before travel"))[:150],
+                    "confidence": str(context_data.get("confidence", "medium"))
+                }
+            else:
+                # Fallback if JSON extraction fails
+                return {
+                    "context": f"Weather {severity} vs normal ({temp_deviation:+.1f}°C)",
+                    "impact": "Pack flexible clothing and monitor weather forecasts daily",
                     "confidence": "medium"
                 }
 
