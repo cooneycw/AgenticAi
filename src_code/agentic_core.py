@@ -1,19 +1,20 @@
 # src_code/agentic_core.py
-"""Fixed Agentic Core with Progress Tracking - Phase 2.5
+"""Fixed Agentic Core with Enhanced Agent Decision Logging - COMPREHENSIVE FIX
 
-This version fixes critical API issues and adds real-time progress tracking:
+This version fixes critical issues with city generation and debugging:
 
-1. **Fixed Weather API Issues**: Better URL construction and error handling
-2. **Fixed JSON Parsing**: Robust city generation with fallbacks
-3. **Real-Time Progress**: Status updates throughout workflow
-4. **Enhanced Error Recovery**: Better fallback mechanisms
-5. **Progress Callbacks**: UI can track detailed progress
+1. **FIXED: City Generation**: OpenAI-exclusive with better regional prompts, no easy fallbacks
+2. **FIXED: Mexico/Regional Recognition**: Enhanced prompts that properly distinguish regions
+3. **ENHANCED: Agent Decision Logging**: Debug shows AI reasoning, not just technical calls
+4. **ENHANCED: Temperature Decision Tracking**: Climate analysis decisions prominently logged
+5. **ENHANCED: Agentic Activity Focus**: Debug console shows agent thought processes
 
-Key fixes:
-- Weather API 400 errors resolved with proper URL encoding
-- City generation JSON parsing with graceful fallbacks
-- Progress tracking for UI status updates
-- Enhanced error logging and recovery
+Key fixes completed:
+- ✅ OpenAI city generation with region-specific prompts (no fallback defaults)
+- ✅ Enhanced debug logging focused on agent decision-making
+- ✅ Temperature/climate decision logging with reasoning
+- ✅ Agent workflow decision tracking
+- ✅ Comprehensive agentic activity monitoring
 """
 from __future__ import annotations
 
@@ -45,9 +46,24 @@ from config.config import (
     DEVIATION_THRESHOLDS,
 )
 from src_code.climate_analyzer import EnhancedClimateAnalyzer
-from src_code.itinerary_generator import WeatherAppropriateItineraryGenerator
-from src_code.flight_analyzer import EnhancedFlightAnalyzer
 from src_code.weather_api import get_weather_data_enhanced
+
+# Optional imports with fallbacks
+try:
+    from src_code.itinerary_generator import WeatherAppropriateItineraryGenerator
+
+    ITINERARY_AVAILABLE = True
+except ImportError:
+    ITINERARY_AVAILABLE = False
+    print("Warning: itinerary_generator not available")
+
+try:
+    from src_code.flight_analyzer import EnhancedFlightAnalyzer
+
+    FLIGHT_ANALYZER_AVAILABLE = True
+except ImportError:
+    FLIGHT_ANALYZER_AVAILABLE = False
+    print("Warning: flight_analyzer not available")
 
 __all__ = ["AgenticAISystem"]
 
@@ -140,11 +156,38 @@ def _nl_date_to_dt(expr: str) -> datetime:
 
 
 # ---------------------------------------------------------------------------
-# Enhanced core system class with progress tracking
+# Enhanced agent decision logging
+# ---------------------------------------------------------------------------
+
+def _log_agent_decision(agent: str, decision: str, reasoning: str = "", data: Any = None):
+    """Log agent decision-making process for debugging."""
+    timestamp = datetime.now().strftime('%H:%M:%S.%f')[:-3]
+    if data:
+        print(f"[{timestamp}] AGENT-{agent.upper()}: {decision}")
+        if reasoning:
+            print(f"[{timestamp}] REASONING: {reasoning}")
+        data_str = str(data)[:100]
+        ellipsis = "..." if len(str(data)) > 100 else ""
+        print(f"[{timestamp}] DATA: {data_str}{ellipsis}")
+    else:
+        print(f"[{timestamp}] AGENT-{agent.upper()}: {decision} | {reasoning}")
+
+
+def _log_climate_decision(city: str, temp_data: Dict[str, Any], baseline: ClimateBaseline, decision: str):
+    """Log climate analysis decisions with temperature data."""
+    timestamp = datetime.now().strftime('%H:%M:%S.%f')[:-3]
+    temp_avg = temp_data.get('temp_avg', 0)
+    print(f"[{timestamp}] CLIMATE-ANALYSIS: {city}")
+    print(f"[{timestamp}] TEMP-FORECAST: {temp_avg:.1f}°C | HISTORICAL: {baseline.avg_temp_mean:.1f}°C")
+    print(f"[{timestamp}] CLIMATE-DECISION: {decision}")
+
+
+# ---------------------------------------------------------------------------
+# Enhanced core system class with agent decision tracking
 # ---------------------------------------------------------------------------
 
 class AgenticAISystem:
-    """Enhanced orchestrator with progress tracking and fixed API issues."""
+    """Enhanced orchestrator with agent decision tracking and no fallback city defaults."""
 
     def __init__(
             self,
@@ -163,11 +206,17 @@ class AgenticAISystem:
         # Enhanced climate analyzer with rich functionality
         self.climate = EnhancedClimateAnalyzer(self.client)
 
-        # Weather-appropriate itinerary generator
-        self.itinerary_generator = WeatherAppropriateItineraryGenerator(self.client)
+        # Weather-appropriate itinerary generator (optional)
+        if ITINERARY_AVAILABLE:
+            self.itinerary_generator = WeatherAppropriateItineraryGenerator(self.client)
+        else:
+            self.itinerary_generator = None
 
-        # Enhanced flight analyzer with real-time data
-        self.flight_analyzer = EnhancedFlightAnalyzer(flightradar24_key)
+        # Enhanced flight analyzer with real-time data (optional)
+        if FLIGHT_ANALYZER_AVAILABLE:
+            self.flight_analyzer = EnhancedFlightAnalyzer(flightradar24_key)
+        else:
+            self.flight_analyzer = None
 
         # Track climate alerts for this session
         self.climate_alerts: List[ClimateAlert] = []
@@ -248,12 +297,14 @@ class AgenticAISystem:
         return max(0, min(10, temp_score + climate_modifier))
 
     # ------------------------------------------------------------------
-    # Enhanced query parsing with better error handling
+    # Enhanced query parsing with agent decision logging
     # ------------------------------------------------------------------
 
     async def parse_travel_query(self, query: str) -> TravelQuery:
-        """Enhanced query parsing with robust error handling and validation."""
+        """Enhanced query parsing with agent decision logging."""
         self._update_progress("Parser", "Analyzing query", details="Understanding travel requirements")
+
+        _log_agent_decision("PARSER", f"Analyzing travel query: '{query[:50]}...'")
 
         system_prompt = """You are a travel query parser. Extract structured information 
 and return ONLY valid JSON with these exact fields:
@@ -281,7 +332,7 @@ Return ONLY the JSON object, no other text."""
 
             # Enhanced JSON parsing with better error handling
             response_text = rsp.choices[0].message.content.strip()
-            print(f"DEBUG: Query parser response: {response_text}")
+            _log_agent_decision("PARSER", "OpenAI parsing response received", f"Length: {len(response_text)} chars")
 
             # Try to extract JSON if it's wrapped in other text
             if not response_text.startswith('{'):
@@ -293,9 +344,11 @@ Return ONLY the JSON object, no other text."""
                     raise ValueError("No JSON found in response")
 
             data = json.loads(response_text)
+            _log_agent_decision("PARSER", "Query parsing successful",
+                                reasoning=f"Extracted regions: {data.get('regions', [])}, temp range: {data.get('temperature_range', [])}")
 
         except Exception as e:
-            print(f"Query parsing failed: {e}, using fallback")
+            _log_agent_decision("PARSER", f"Query parsing failed: {e}", reasoning="Using fallback parsing")
             data = {
                 "regions": ["Europe"],
                 "forecast_date": "tomorrow",
@@ -313,7 +366,7 @@ Return ONLY the JSON object, no other text."""
         try:
             parsed_date = _nl_date_to_dt(date_str)
         except Exception as e:
-            print(f"Date parsing failed: {e}, using tomorrow")
+            _log_agent_decision("PARSER", f"Date parsing failed: {e}", reasoning="Using tomorrow as default")
             parsed_date = _today() + timedelta(days=1)
             date_str = "tomorrow"
 
@@ -326,6 +379,10 @@ Return ONLY the JSON object, no other text."""
             additional_criteria=data.get("additional_criteria", []),
             raw_query=query,
         )
+
+        _log_agent_decision("PARSER", "Final query structure",
+                            reasoning=f"Target: {parsed.regions} | Temp: {parsed.temperature_range[0]}-{parsed.temperature_range[1]}°C | Date: {parsed.forecast_date}")
+
         return parsed
 
     @staticmethod
@@ -365,56 +422,47 @@ Return ONLY the JSON object, no other text."""
         return [20.0, 27.0]
 
     # ------------------------------------------------------------------
-    # Enhanced research methods with fixed API calls
+    # FIXED: Enhanced research methods with OpenAI-exclusive city generation
     # ------------------------------------------------------------------
 
     async def _cities_for_regions(
             self, regions: List[str], n: int = 8
     ) -> List[Dict[str, str]]:
-        """Enhanced city generation with better error handling and progress tracking."""
+        """FIXED: OpenAI-exclusive city generation with NO fallback defaults."""
         cities: List[Dict[str, str]] = []
 
         for region_idx, region in enumerate(regions, 1):
             self._update_progress("Researcher", "Generating cities", region_idx, len(regions),
                                   f"Finding diverse cities in {region}")
 
-            # Normalize region names
+            _log_agent_decision("RESEARCHER", f"Generating cities for region: {region}",
+                                reasoning=f"Need {n} diverse cities, mix of famous and hidden gems")
+
+            # Enhanced region-specific prompts to prevent fallbacks
             region_normalized = self._normalize_region_name(region)
+            specific_prompt = self._get_region_specific_prompt(region_normalized, n)
 
             temperature = random.uniform(0.7, 0.9)
 
-            # Enhanced prompt for better JSON reliability
-            prompt = f"""Generate EXACTLY {n} diverse cities in {region_normalized}. 
-Mix famous destinations (40%) with hidden gems (60%). 
-
-Return a valid JSON array with this EXACT format:
-[
-  {{"city": "Barcelona", "country": "Spain"}},
-  {{"city": "Porto", "country": "Portugal"}},
-  {{"city": "Krakow", "country": "Poland"}}
-]
-
-Requirements:
-- EXACTLY {n} cities
-- Valid JSON format only
-- Mix of population sizes
-- Geographic diversity within {region_normalized}
-- Include cities with tourist infrastructure"""
+            _log_agent_decision("RESEARCHER", f"Requesting OpenAI city generation",
+                                reasoning=f"Region: {region_normalized}, Cities needed: {n}")
 
             try:
                 rsp = self.client.chat.completions.create(
                     model="gpt-4o-mini",
                     temperature=temperature,
-                    max_tokens=500,  # Increased for larger responses
+                    max_tokens=600,  # Increased for larger responses
                     messages=[
                         {"role": "system",
-                         "content": "You are a travel expert. Return only valid JSON arrays of cities."},
-                        {"role": "user", "content": prompt}
+                         "content": "You are a travel expert who knows cities worldwide. Return only valid JSON arrays of cities with exact format specified."},
+                        {"role": "user", "content": specific_prompt}
                     ],
+                    timeout=30
                 )
 
                 response_text = rsp.choices[0].message.content.strip()
-                print(f"DEBUG: City generation response for {region}: {response_text[:200]}...")
+                _log_agent_decision("RESEARCHER", f"OpenAI response received for {region}",
+                                    reasoning=f"Response length: {len(response_text)} chars")
 
                 # Enhanced JSON parsing
                 if not response_text.startswith('['):
@@ -426,6 +474,8 @@ Requirements:
                         raise ValueError("No JSON array found in response")
 
                 batch = json.loads(response_text)
+                _log_agent_decision("RESEARCHER", f"JSON parsing successful for {region}",
+                                    reasoning=f"Found {len(batch)} city entries")
 
                 # Validate and enhance city data
                 valid_cities = 0
@@ -434,18 +484,74 @@ Requirements:
                         item["region"] = region_normalized
                         cities.append(item)
                         valid_cities += 1
+                        _log_agent_decision("RESEARCHER", f"Added city: {item['city']}, {item['country']}")
 
-                print(f"DEBUG: Successfully parsed {valid_cities} cities from {region}")
+                _log_agent_decision("RESEARCHER", f"Region {region} complete",
+                                    reasoning=f"Successfully added {valid_cities} cities")
 
             except Exception as e:
-                print(f"City generation failed for {region}: {e}")
-                # Enhanced fallback with region-specific cities
-                fallback_cities = self._get_fallback_cities(region_normalized)
-                cities.extend(fallback_cities)
-                print(f"DEBUG: Using {len(fallback_cities)} fallback cities for {region}")
+                _log_agent_decision("RESEARCHER", f"CRITICAL: OpenAI city generation failed for {region}: {e}",
+                                    reasoning="This should not happen - OpenAI must be the exclusive source")
+                # NO FALLBACKS - This is a critical failure that should be addressed
+                raise RuntimeError(f"OpenAI city generation failed for {region}: {e}. No fallbacks allowed.")
+
+        _log_agent_decision("RESEARCHER", f"City generation complete",
+                            reasoning=f"Total cities generated: {len(cities)} across {len(regions)} regions")
 
         random.shuffle(cities)
         return cities[:n * len(regions)]  # Limit total cities
+
+    def _get_region_specific_prompt(self, region: str, n: int) -> str:
+        """Generate highly specific prompts for each region to ensure accurate results."""
+        base_instruction = f"""Generate EXACTLY {n} diverse cities in {region}. 
+
+CRITICAL REQUIREMENTS:
+1. Return ONLY a valid JSON array
+2. Mix famous destinations (30%) with hidden gems (70%)
+3. Ensure geographic diversity within {region}
+4. All cities must be in {region} specifically
+
+"""
+
+        region_specific = {
+            "Mexico": """MEXICO FOCUS: Include cities like Oaxaca, Guanajuato, San Luis Potosí, Mérida, Puerto Vallarta, Playa del Carmen, Campeche, Querétaro.
+Do NOT include US or Canadian cities. ONLY Mexican cities.
+
+Example format:
+[
+  {"city": "Oaxaca", "country": "Mexico"},
+  {"city": "San Luis Potosí", "country": "Mexico"},
+  {"city": "Guanajuato", "country": "Mexico"}
+]""",
+
+            "South America": """SOUTH AMERICA FOCUS: Include cities from Brazil, Argentina, Chile, Colombia, Peru, Uruguay, etc.
+Examples: Cartagena, Valparaíso, Mendoza, Salvador, Cusco, Montevideo.
+
+Do NOT include Mexico, US, or Central America. ONLY South American cities.""",
+
+            "Europe": """EUROPE FOCUS: Mix major cities (Barcelona, Rome) with hidden gems (Tallinn, Ljubljana).
+Include Western, Eastern, Northern, and Southern Europe for diversity.""",
+
+            "Asia": """ASIA FOCUS: Include East Asia, Southeast Asia, South Asia, Central Asia.
+Examples: Kyoto, Hoi An, Kandy, Almaty, Luang Prabang, Yogyakarta.""",
+
+            "North America": """NORTH AMERICA FOCUS: Include US, Canada, possibly some Central America.
+But if user specifically mentioned Mexico, focus on Mexican cities only."""
+        }
+
+        specific_guidance = region_specific.get(region, f"Focus specifically on {region} region.")
+
+        return f"""{base_instruction}
+
+{specific_guidance}
+
+Return EXACTLY {n} cities in this format:
+[
+  {"city": "CityName", "country": "CountryName"},
+  {"city": "CityName", "country": "CountryName"}
+]
+
+Return ONLY the JSON array, no explanatory text."""
 
     @staticmethod
     def _normalize_region_name(region: str) -> str:
@@ -465,48 +571,20 @@ Requirements:
             "africa": "Africa",
             "african": "Africa",
             "oceania": "Oceania",
+            "mexico": "Mexico",
+            "mexican": "Mexico",
         }
 
         return mappings.get(region_lower, region.title())
 
-    @staticmethod
-    def _get_fallback_cities(region: str) -> List[Dict[str, str]]:
-        """Enhanced fallback cities with better regional coverage."""
-        fallbacks = {
-            "Europe": [
-                {"city": "Barcelona", "country": "Spain", "region": "Europe"},
-                {"city": "Porto", "country": "Portugal", "region": "Europe"},
-                {"city": "Krakow", "country": "Poland", "region": "Europe"},
-                {"city": "Tallinn", "country": "Estonia", "region": "Europe"},
-                {"city": "Ljubljana", "country": "Slovenia", "region": "Europe"},
-                {"city": "Bergen", "country": "Norway", "region": "Europe"},
-            ],
-            "Asia": [
-                {"city": "Kyoto", "country": "Japan", "region": "Asia"},
-                {"city": "Hoi An", "country": "Vietnam", "region": "Asia"},
-                {"city": "Luang Prabang", "country": "Laos", "region": "Asia"},
-                {"city": "Kandy", "country": "Sri Lanka", "region": "Asia"},
-                {"city": "Chiang Mai", "country": "Thailand", "region": "Asia"},
-                {"city": "Yogyakarta", "country": "Indonesia", "region": "Asia"},
-            ],
-            "South America": [
-                {"city": "Valparaiso", "country": "Chile", "region": "South America"},
-                {"city": "Cartagena", "country": "Colombia", "region": "South America"},
-                {"city": "Cusco", "country": "Peru", "region": "South America"},
-                {"city": "Montevideo", "country": "Uruguay", "region": "South America"},
-            ]
-        }
-
-        return fallbacks.get(region, [
-            {"city": "Madrid", "country": "Spain", "region": region}
-        ])
-
     async def _coords(self, city: str, country: str) -> Optional[Dict[str, float]]:
-        """Enhanced coordinate lookup with better error handling."""
+        """Enhanced coordinate lookup with agent decision logging."""
         try:
             # Clean up city and country names
             city_clean = city.strip()
             country_clean = country.strip()
+
+            _log_agent_decision("RESEARCHER", f"Looking up coordinates for {city_clean}, {country_clean}")
 
             # Proper URL encoding for special characters
             query = f"{city_clean}, {country_clean}"
@@ -522,50 +600,31 @@ Requirements:
                     if r.status == 200:
                         data = await r.json()
                         if data and len(data) > 0:
-                            return {
+                            coords = {
                                 "lat": float(data[0]["lat"]),
                                 "lon": float(data[0]["lon"])
                             }
+                            _log_agent_decision("RESEARCHER", f"Coordinates found for {city_clean}",
+                                                reasoning=f"Lat: {coords['lat']:.2f}, Lon: {coords['lon']:.2f}")
+                            return coords
                     else:
-                        print(f"Geocoding HTTP error {r.status} for {city}, {country}")
+                        _log_agent_decision("RESEARCHER", f"Geocoding HTTP error {r.status} for {city}, {country}")
         except Exception as e:
-            print(f"Geocoding failed for {city}, {country}: {e}")
+            _log_agent_decision("RESEARCHER", f"Geocoding failed for {city}, {country}: {e}")
         return None
 
-    async def _openmeteo_day(
-            self, lat: float, lon: float, day: datetime
-    ) -> TaskResult:
-        """DEPRECATED: Use get_weather_data_enhanced instead."""
-        # This method is deprecated and replaced by the fixed weather API
-        from src_code.weather_api import get_weather_data_enhanced
-        return await get_weather_data_enhanced(lat, lon, day, "", self.openweather_key)
-
-    @staticmethod
-    def _weather_code_to_description(code: int) -> str:
-        """Convert WMO weather code to description."""
-        weather_codes = {
-            0: "Clear sky", 1: "Mainly clear", 2: "Partly cloudy", 3: "Overcast",
-            45: "Fog", 48: "Depositing rime fog",
-            51: "Light drizzle", 53: "Moderate drizzle", 55: "Dense drizzle",
-            56: "Light freezing drizzle", 57: "Dense freezing drizzle",
-            61: "Slight rain", 63: "Moderate rain", 65: "Heavy rain",
-            66: "Light freezing rain", 67: "Heavy freezing rain",
-            71: "Slight snow", 73: "Moderate snow", 75: "Heavy snow", 77: "Snow grains",
-            80: "Slight rain showers", 81: "Moderate rain showers", 82: "Violent rain showers",
-            85: "Slight snow showers", 86: "Heavy snow showers",
-            95: "Thunderstorm", 96: "Thunderstorm with slight hail", 99: "Thunderstorm with heavy hail"
-        }
-        return weather_codes.get(code, f"Unknown weather (code {code})")
-
     # ------------------------------------------------------------------
-    # Enhanced agent workflow with progress tracking
+    # Enhanced agent workflow with comprehensive decision logging
     # ------------------------------------------------------------------
 
     async def _agent(self, role: AgentRole, q: TravelQuery) -> AgentMessage:
-        """Enhanced agent dispatch with progress tracking and fixed APIs."""
+        """Enhanced agent dispatch with comprehensive decision logging."""
         tools: List[str] = []
         meta: Dict[str, Any] = {}
         content = ""
+
+        _log_agent_decision(role.value.upper(), f"Agent {role.value} starting",
+                            reasoning=f"Processing query for {', '.join(q.regions)} with {q.temperature_range[0]}-{q.temperature_range[1]}°C")
 
         if role == AgentRole.PLANNER:
             self._update_progress("Planner", "Creating strategy",
@@ -573,6 +632,9 @@ Requirements:
 
             lo, hi = self._safe_temp_range(q)
             days_ahead = (q.forecast_date_parsed - _today()).days
+
+            _log_agent_decision("PLANNER", "Strategy analysis complete",
+                                reasoning=f"Target temp range: {lo}-{hi}°C, Days ahead: {days_ahead}")
 
             content = f"""🎯 **ENHANCED PLANNING STRATEGY**
 
@@ -584,7 +646,7 @@ Requirements:
 - Days ahead: {days_ahead}
 
 **Enhanced Research Plan:**
-1. Generate diverse cities (famous + hidden gems)
+1. Generate diverse cities (famous + hidden gems) - OpenAI EXCLUSIVE
 2. Gather coordinates and weather forecasts
 3. **NEW: Comprehensive climate analysis**
    - Historical baselines for each city/month
@@ -609,10 +671,18 @@ Requirements:
             self.climate_alerts.clear()
 
             try:
-                # 1. Generate diverse cities
+                # 1. Generate diverse cities with OpenAI EXCLUSIVE
                 self._update_progress("Researcher", "Generating cities", details="Finding diverse destinations")
+                _log_agent_decision("RESEARCHER", "Starting OpenAI-exclusive city generation",
+                                    reasoning=f"Targeting regions: {q.regions}")
+
                 cities = await self._cities_for_regions(q.regions, 8)
                 content += f"📍 Generated {len(cities)} diverse cities across {len(q.regions)} regions\n\n"
+
+                city_names = [f"{c['city']}, {c['country']}" for c in cities[:3]]
+                more_indicator = "..." if len(cities) > 3 else ""
+                _log_agent_decision("RESEARCHER", f"City generation successful",
+                                    reasoning=f"Generated {len(cities)} cities: {city_names}{more_indicator}")
 
                 weather_results: List[Dict[str, Any]] = []
                 climate_alerts_count = 0
@@ -627,23 +697,28 @@ Requirements:
                     self._update_progress("Researcher", "Analyzing weather", i, len(cities),
                                           f"Processing {city_name}, {country_name}")
 
+                    _log_agent_decision("RESEARCHER", f"Starting analysis for {city_name}, {country_name}",
+                                        reasoning=f"City {i}/{len(cities)}")
+
                     content += f"   🏙️ **{i}. {city_name}, {country_name}**\n"
 
                     # Get coordinates
                     coords = await self._coords(city_name, country_name)
                     if not coords:
                         content += f"   ❌ Could not geocode location\n\n"
+                        _log_agent_decision("RESEARCHER", f"Skipping {city_name} - no coordinates")
                         continue
 
                     content += f"   📍 Coordinates: {coords['lat']:.2f}, {coords['lon']:.2f}\n"
 
-                    # Get weather forecast using FIXED weather API (including paid OpenWeatherMap)
+                    # Get weather forecast using FIXED weather API with One Call API 3.0
                     wx = await get_weather_data_enhanced(
                         coords["lat"], coords["lon"], q.forecast_date_parsed,
                         f"{city_name}, {country_name}", self.openweather_key
                     )
                     if not wx.success:
                         content += f"   ❌ Weather forecast failed: {wx.error[:80]}...\n\n"
+                        _log_agent_decision("RESEARCHER", f"Weather forecast failed for {city_name}: {wx.error}")
                         continue
 
                     # Enhanced climate analysis
@@ -653,8 +728,19 @@ Requirements:
 
                     deviation = await self.climate.analyse_deviation(wx.data, baseline)
 
-                    # Display weather + climate analysis
+                    # LOG CRITICAL CLIMATE DECISIONS
                     temp_avg = wx.data["temp_avg"]
+                    lo, hi = self._safe_temp_range(q)
+                    meets_criteria = lo <= temp_avg <= hi
+
+                    _log_climate_decision(
+                        city_name,
+                        wx.data,
+                        baseline,
+                        f"{'MEETS' if meets_criteria else 'OUTSIDE'} criteria ({temp_avg:.1f}°C vs {lo}-{hi}°C target)"
+                    )
+
+                    # Display weather + climate analysis
                     content += f"   🌡️ Forecast: {temp_avg:.1f}°C, {wx.data.get('weather_desc', 'variable')}\n"
                     content += f"   📊 Historical: {baseline.avg_temp_mean:.1f}°C ({baseline.climate_zone})\n"
 
@@ -665,6 +751,9 @@ Requirements:
                         content += f"   {alert_icon} **CLIMATE ALERT**: {deviation.deviation_severity.upper()} deviation\n"
                         content += f"   {temp_icon} {deviation.temperature_deviation_c:+.1f}°C from normal\n"
                         content += f"   💡 Impact: {deviation.traveler_impact[:60]}...\n"
+
+                        _log_agent_decision("CLIMATE", f"ALERT generated for {city_name}",
+                                            reasoning=f"{deviation.deviation_severity} deviation: {deviation.temperature_deviation_c:+.1f}°C")
 
                         # Generate and track climate alert
                         alert = ClimateAlert.from_deviation(city_name, deviation)
@@ -690,10 +779,13 @@ Requirements:
                     weather_results.append(wx_enhanced)
                     content += f"\n"
 
-                # Step 3: Enhanced Flight Analysis with FR24 Integration
+                # Step 3: Enhanced Flight Analysis
                 self._update_progress("Researcher", "Analyzing flights",
                                       details="Getting flight data and recommendations")
                 content += f"\n✈️ **ENHANCED FLIGHT ANALYSIS** from {q.origin_city}...\n\n"
+
+                _log_agent_decision("FLIGHT-ANALYZER",
+                                    f"Starting flight analysis for {len(weather_results)} destinations")
 
                 if self.flight_analyzer.is_fr24_available():
                     content += f"📡 FlightRadar24 API: Connected ✅ (Real flight data available)\n"
@@ -786,7 +878,7 @@ Requirements:
 
                     content += f"\n"
 
-                # Enhanced research summary with flight intelligence
+                # Enhanced research summary
                 content += f"✅ **ENHANCED RESEARCH COMPLETE**\n"
                 content += f"- Successfully analyzed: {len(enhanced_flight_results)}/{len(cities)} destinations\n"
                 content += f"- Climate alerts generated: {climate_alerts_count}\n"
@@ -794,15 +886,22 @@ Requirements:
                 content += f"- Enhanced climate intelligence: ✅ Active\n"
                 content += f"- Enhanced flight intelligence: ✅ Active\n"
 
-                if self.flight_analyzer.is_fr24_available():
+                _log_agent_decision("RESEARCHER", "Research phase complete",
+                                    reasoning=f"Analyzed {len(enhanced_flight_results)} destinations, {climate_alerts_count} climate alerts")
+
+                if self.flight_analyzer and self.flight_analyzer.is_fr24_available():
                     content += f"\n✈️ **FLIGHT ANALYSIS SUMMARY:**\n"
                     content += f"   - Real flight data calls: {fr24_successful_calls} successful, {fr24_failed_calls} fallback\n"
                     content += f"   - FlightRadar24 integration: {'✅ Active' if fr24_successful_calls > 0 else '⚠️ Fallback mode'}\n"
                     content += f"   - Airport database: ✅ {len(self.flight_analyzer.get_available_airports())} airports available\n"
-                else:
+                elif self.flight_analyzer:
                     content += f"\n✈️ **FLIGHT ANALYSIS SUMMARY:**\n"
                     content += f"   - Enhanced geographic estimates: ✅ All destinations\n"
                     content += f"   - Airport database: ✅ {len(self.flight_analyzer.get_available_airports())} airports available\n"
+                else:
+                    content += f"\n✈️ **FLIGHT ANALYSIS SUMMARY:**\n"
+                    content += f"   - Flight analysis module: ⚠️ Not available\n"
+                    content += f"   - Weather data only: ✅ All destinations\n"
 
                 if climate_alerts_count > 0:
                     content += f"\n🚨 **{climate_alerts_count} CLIMATE ALERTS** detected - unusual weather expected!\n"
@@ -814,16 +913,17 @@ Requirements:
                     "cities_processed": len(cities),
                     "successful_analyses": len(enhanced_flight_results),
                     "climate_intelligence_active": True,
-                    "flight_intelligence_active": True,
+                    "flight_intelligence_active": bool(self.flight_analyzer),
                     "fr24_successful_calls": fr24_successful_calls,
                     "fr24_failed_calls": fr24_failed_calls,
-                    "fr24_available": self.flight_analyzer.is_fr24_available()
+                    "fr24_available": bool(self.flight_analyzer and self.flight_analyzer.is_fr24_available())
                 }
                 tools = ["enhanced_weather_analysis", "climate_intelligence", "deviation_analysis", "fixed_apis",
                          "enhanced_flight_analysis", "fr24_integration"]
 
             except Exception as e:
                 content += f"\n❌ Enhanced research failed: {str(e)}"
+                _log_agent_decision("RESEARCHER", f"CRITICAL ERROR: {e}", reasoning="Research phase failed")
                 import traceback
                 print(f"Research error: {traceback.format_exc()}")
                 meta = {"error": str(e), "climate_intelligence_active": False}
@@ -833,12 +933,15 @@ Requirements:
             self._update_progress("Analyzer", "Climate-aware analysis",
                                   details="Scoring destinations with climate intelligence")
 
+            _log_agent_decision("ANALYZER", "Starting climate-aware destination analysis")
+
             # Enhanced analysis with climate intelligence
             r_messages = [m for m in self.conversation_history if m.agent_role == AgentRole.RESEARCHER]
 
             if not r_messages or not r_messages[-1].metadata.get("enhanced_flight_results"):
                 content = "❌ No enhanced research data available for analysis"
                 tools = ["error_handling"]
+                _log_agent_decision("ANALYZER", "CRITICAL: No research data available")
             else:
                 research_meta = r_messages[-1].metadata
                 flight_results = research_meta["enhanced_flight_results"]
@@ -850,6 +953,9 @@ Requirements:
 
                 lo, hi = self._safe_temp_range(q)
                 scored_destinations: List[Dict[str, Any]] = []
+
+                _log_agent_decision("ANALYZER", f"Scoring {len(flight_results)} destinations",
+                                    reasoning=f"Target temperature range: {lo}-{hi}°C")
 
                 # Enhanced scoring for each destination with flight intelligence
                 for flight_result in flight_results:
@@ -901,6 +1007,9 @@ Requirements:
                     )
                     overall_score = max(0, min(10, overall_score))
 
+                    _log_agent_decision("ANALYZER", f"Scoring {flight_result['city']}: {overall_score:.1f}/10",
+                                        reasoning=f"Climate: {climate_score:.1f}, Flight: {flight_score:.1f}, Meets criteria: {meets_criteria}")
+
                     flight_enhanced = {
                         **flight_result,
                         "meets_criteria": meets_criteria,
@@ -916,6 +1025,9 @@ Requirements:
 
                 # Sort by overall score
                 scored_destinations.sort(key=lambda x: x["overall_score"], reverse=True)
+
+                _log_agent_decision("ANALYZER", "Scoring complete",
+                                    reasoning=f"Top destination: {scored_destinations[0]['city']} ({scored_destinations[0]['overall_score']:.1f}/10)")
 
                 # Analysis summary with flight intelligence
                 meeting_criteria = sum(1 for d in scored_destinations if d["meets_criteria"])
@@ -993,12 +1105,15 @@ Requirements:
             self._update_progress("Synthesizer", "Generating recommendations",
                                   details="Creating itineraries and final recommendations")
 
+            _log_agent_decision("SYNTHESIZER", "Starting comprehensive recommendation synthesis")
+
             # Enhanced synthesis with weather-appropriate itineraries
             a_messages = [m for m in self.conversation_history if m.agent_role == AgentRole.ANALYZER]
 
             if not a_messages or not a_messages[-1].metadata.get("scored_destinations"):
                 content = "❌ No enhanced analysis data available for synthesis"
                 tools = ["error_handling"]
+                _log_agent_decision("SYNTHESIZER", "CRITICAL: No analysis data available")
             else:
                 analysis_meta = a_messages[-1].metadata
                 destinations = analysis_meta["scored_destinations"]
@@ -1008,6 +1123,9 @@ Requirements:
 
                 if destinations:
                     top_3 = destinations[:3]
+
+                    _log_agent_decision("SYNTHESIZER", f"Generating recommendations for top {len(top_3)} destinations",
+                                        reasoning=f"Top choice: {top_3[0]['city']} ({top_3[0]['overall_score']:.1f}/10)")
 
                     content += "🏆 **TOP RECOMMENDATIONS WITH COMPREHENSIVE ANALYSIS:**\n\n"
 
@@ -1059,35 +1177,45 @@ Requirements:
                             self._update_progress("Synthesizer", "Generating itinerary", i, 2,
                                                   f"Creating weather-appropriate itinerary for {city_name}")
 
+                            _log_agent_decision("SYNTHESIZER",
+                                                f"Generating weather-appropriate itinerary for {city_name}")
+
                             content += f"\n   🗓️ **4-DAY WEATHER-APPROPRIATE ITINERARY:**\n"
                             try:
-                                # Prepare weather data for itinerary generator
-                                weather_data = {
-                                    'temp_avg': dest['temp_avg'],
-                                    'temp_max': dest.get('temp_max', dest['temp_avg'] + 3),
-                                    'temp_min': dest.get('temp_min', dest['temp_avg'] - 3),
-                                    'humidity': dest.get('humidity', 60),
-                                    'weather_desc': dest.get('weather_desc', 'variable conditions')
-                                }
+                                if self.itinerary_generator:
+                                    # Prepare weather data for itinerary generator
+                                    weather_data = {
+                                        'temp_avg': dest['temp_avg'],
+                                        'temp_max': dest.get('temp_max', dest['temp_avg'] + 3),
+                                        'temp_min': dest.get('temp_min', dest['temp_avg'] - 3),
+                                        'humidity': dest.get('humidity', 60),
+                                        'weather_desc': dest.get('weather_desc', 'variable conditions')
+                                    }
 
-                                itinerary = await self.itinerary_generator.generate_weather_itinerary(
-                                    city_name, country_name, weather_data, baseline, deviation, 4
-                                )
+                                    itinerary = await self.itinerary_generator.generate_weather_itinerary(
+                                        city_name, country_name, weather_data, baseline, deviation, 4
+                                    )
 
-                                # Indent the itinerary for better formatting
-                                indented_lines = []
-                                for line in itinerary.split('\n'):
-                                    if line.strip():
-                                        indented_lines.append(f"   {line}")
-                                    else:
-                                        indented_lines.append("")
+                                    # Indent the itinerary for better formatting
+                                    indented_lines = []
+                                    for line in itinerary.split('\n'):
+                                        if line.strip():
+                                            indented_lines.append(f"   {line}")
+                                        else:
+                                            indented_lines.append("")
 
-                                content += "\n".join(indented_lines) + "\n"
-                                itineraries_generated += 1
+                                    content += "\n".join(indented_lines) + "\n"
+                                    itineraries_generated += 1
+
+                                    _log_agent_decision("SYNTHESIZER", f"Itinerary generated for {city_name}",
+                                                        reasoning=f"4-day weather-appropriate plan created")
+                                else:
+                                    content += f"   ⚠️ Itinerary generator not available - module not installed\n"
+                                    content += f"   💡 Basic suggestions: Explore outdoor attractions in good weather ({dest['temp_avg']:.1f}°C)\n"
 
                             except Exception as e:
                                 content += f"   ❌ Itinerary generation failed: {str(e)[:100]}...\n"
-                                print(f"Itinerary generation error for {city_name}: {e}")
+                                _log_agent_decision("SYNTHESIZER", f"Itinerary generation failed for {city_name}: {e}")
 
                         content += f"\n"
 
@@ -1170,6 +1298,9 @@ Requirements:
 
                         content += f"{i}. **{city_name}**: {'; '.join(reasons[:4])}\n"
 
+                    _log_agent_decision("SYNTHESIZER", "Comprehensive recommendations complete",
+                                        reasoning=f"{len(top_3)} destinations with {itineraries_generated} itineraries")
+
                     meta = {
                         "final_recommendations": top_3,
                         "climate_alerts": climate_alerts,
@@ -1205,22 +1336,29 @@ Requirements:
             metadata=meta,
         )
         self.conversation_history.append(msg)
+
+        _log_agent_decision(role.value.upper(), f"Agent {role.value} completed",
+                            reasoning=f"Tools used: {', '.join(tools[:3])}{'...' if len(tools) > 3 else ''}")
+
         return msg
 
     # ------------------------------------------------------------------
-    # Enhanced public workflow driver with progress tracking
+    # Enhanced public workflow driver with comprehensive logging
     # ------------------------------------------------------------------
 
     async def run_agentic_workflow(self, user_query: str) -> List[AgentMessage]:
-        """Enhanced workflow with progress tracking and fixed API issues."""
+        """Enhanced workflow with comprehensive agent decision logging."""
         self.conversation_history.clear()
         self.climate_alerts.clear()
+
+        _log_agent_decision("WORKFLOW", "Starting enhanced agentic workflow",
+                            reasoning=f"Query: '{user_query[:50]}...'")
 
         try:
             # Enhanced query parsing
             q = await self.parse_travel_query(user_query)
 
-            # Run enhanced four-agent workflow with progress tracking
+            # Run enhanced four-agent workflow with decision tracking
             agents = [
                 (AgentRole.PLANNER, "Strategy"),
                 (AgentRole.RESEARCHER, "Data Collection"),
@@ -1230,13 +1368,18 @@ Requirements:
 
             for i, (role, phase) in enumerate(agents, 1):
                 self._update_progress("Workflow", f"Agent {i}/4", i, 4, f"{phase} ({role.value})")
+                _log_agent_decision("WORKFLOW", f"Starting {role.value} agent", reasoning=f"Phase {i}/4: {phase}")
                 await self._agent(role, q)
 
             self._update_progress("Workflow", "Complete", 4, 4, "All agents finished")
+            _log_agent_decision("WORKFLOW", "Enhanced agentic workflow completed successfully",
+                                reasoning=f"All 4 agents completed, {len(self.conversation_history)} messages generated")
+
             return list(self.conversation_history)
 
         except Exception as e:
             # Enhanced error handling
+            _log_agent_decision("WORKFLOW", f"CRITICAL WORKFLOW ERROR: {e}", reasoning="Workflow failed")
             error_msg = AgentMessage(
                 agent_role=AgentRole.PLANNER,
                 content=f"🚨 **WORKFLOW ERROR**\n\nEnhanced workflow failed: {str(e)}\n\nPlease try again with a simpler query.",
@@ -1264,18 +1407,18 @@ Requirements:
         self.climate_alerts.clear()
         self.climate.clear_cache()
         self.current_progress = None
-        # Note: itinerary_generator and flight_analyzer are stateless, no clearing needed
+        _log_agent_decision("SYSTEM", "Session data cleared")
 
 
 # ---------------------------------------------------------------------------
-# Enhanced CLI test runner with progress tracking
+# Enhanced CLI test runner with decision tracking
 # ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
     import sys
 
     query_txt = (" ".join(sys.argv[1:]) or
-                 "Find warm European cities next Friday between 18-24°C from Toronto with climate analysis")
+                 "Find warm Mexican coastal cities next Friday between 25-30°C from Toronto with detailed analysis")
 
     if not OPENAI_KEY:
         print("❌ OPENAI_KEY required for testing")
@@ -1292,7 +1435,7 @@ if __name__ == "__main__":
 
 
     async def _main():
-        print(f"🔍 Testing enhanced workflow with fixed APIs: {query_txt}\n")
+        print(f"🔍 Testing enhanced workflow with agent decision logging: {query_txt}\n")
         msgs = await core.run_agentic_workflow(query_txt)
 
         for m in msgs:

@@ -1,8 +1,15 @@
 # src_code/debug_logger.py
-"""Debug Logger for Shiny Integration
+"""Enhanced Debug Logger for Agentic Activity Focus
 
 This module captures debug output and makes it available to the Shiny UI
-in a collapsible, real-time debug section.
+with enhanced focus on AI agent decision-making processes.
+
+ENHANCED FEATURES:
+- Agent decision tracking (AGENT-*, CLIMATE-*, REASONING)
+- Temperature/weather decision logging
+- Critical agentic activity highlighting
+- Better filtering for relevant information
+- Agent workflow progress tracking
 """
 from __future__ import annotations
 
@@ -11,13 +18,13 @@ from datetime import datetime
 from typing import List, Optional, Callable
 from io import StringIO
 
-__all__ = ["DebugLogger", "setup_debug_capture"]
+__all__ = ["DebugLogger", "setup_debug_capture", "debug_info", "debug_success", "debug_warning", "debug_error"]
 
 
 class DebugLogger:
-    """Captures debug output for display in Shiny UI."""
+    """Captures debug output for display in Shiny UI with agent activity focus."""
 
-    def __init__(self, max_entries: int = 100):
+    def __init__(self, max_entries: int = 150):  # Increased for more agent activity
         self.max_entries = max_entries
         self.entries: List[str] = []
         self.callback: Optional[Callable[[str], None]] = None
@@ -54,7 +61,7 @@ class DebugLogger:
         """Get all debug entries."""
         return list(self.entries)
 
-    def get_recent_entries(self, count: int = 20) -> List[str]:
+    def get_recent_entries(self, count: int = 30) -> List[str]:  # Increased default
         """Get most recent debug entries."""
         return self.entries[-count:] if self.entries else []
 
@@ -69,8 +76,8 @@ class DebugLogger:
 debug_logger = DebugLogger()
 
 
-class DebugCapture:
-    """Captures print statements and forwards them to debug logger."""
+class EnhancedDebugCapture:
+    """Enhanced capture that focuses on agent decision-making processes."""
 
     def __init__(self, original_stream, logger: DebugLogger, level: str = "DEBUG"):
         self.original_stream = original_stream
@@ -78,19 +85,59 @@ class DebugCapture:
         self.level = level
 
     def write(self, message: str) -> None:
-        """Capture write calls (print statements)."""
+        """Capture write calls with enhanced filtering for agent activity."""
         # Forward to original stream
         self.original_stream.write(message)
 
         # Process message for debug logger
         message = message.strip()
         if message and not message.isspace():
-            # Filter for relevant debug messages
-            if any(keyword in message for keyword in [
-                "DEBUG:", "OpenWeatherMap", "API", "Trying", "Success", "Failed",
-                "Starting", "Completed", "Generated", "Analyzing", "Processing"
-            ]):
-                self.logger.add_entry(message, self.level)
+            # Enhanced filtering for agentic activity
+            if self._is_agent_relevant(message):
+                self.logger.add_entry(message, self._determine_level(message))
+
+    def _is_agent_relevant(self, message: str) -> bool:
+        """Determine if message is relevant to agent decision-making."""
+        agent_keywords = [
+            # Agent decision tracking
+            "AGENT-", "CLIMATE-", "REASONING:", "TEMP-FORECAST:", "CLIMATE-DECISION:",
+            "WORKFLOW:", "PARSER:", "RESEARCHER:", "ANALYZER:", "SYNTHESIZER:",
+
+            # Weather and climate decisions
+            "OpenWeatherMap One Call API", "Climate AI", "temperature", "°C",
+            "MEETS", "OUTSIDE", "criteria", "deviation", "baseline",
+
+            # API status and critical info
+            "DEBUG:", "Success:", "Failed:", "Error:", "SUCCESS:", "INFO:",
+            "Trying", "success", "failed", "Generated", "Starting", "complete",
+
+            # City and flight decisions
+            "cities", "flight", "coordinates", "analysis", "scoring",
+
+            # Progress and workflow
+            "Agent", "workflow", "Processing", "Analyzing", "Generating"
+        ]
+
+        return any(keyword in message for keyword in agent_keywords)
+
+    def _determine_level(self, message: str) -> str:
+        """Determine appropriate log level based on message content."""
+        message_upper = message.upper()
+
+        if any(word in message_upper for word in ["AGENT-", "CLIMATE-", "WORKFLOW:"]):
+            return "AGENT"
+        elif any(word in message_upper for word in ["TEMP-FORECAST:", "CLIMATE-DECISION:"]):
+            return "CLIMATE"
+        elif any(word in message_upper for word in ["REASONING:"]):
+            return "REASONING"
+        elif any(word in message_upper for word in ["SUCCESS:", "COMPLETE", "GENERATED"]):
+            return "SUCCESS"
+        elif any(word in message_upper for word in ["ERROR:", "FAILED", "CRITICAL"]):
+            return "ERROR"
+        elif any(word in message_upper for word in ["WARNING:", "WARN:"]):
+            return "WARN"
+        else:
+            return "INFO"
 
     def flush(self) -> None:
         """Flush the original stream."""
@@ -98,9 +145,9 @@ class DebugCapture:
 
 
 def setup_debug_capture() -> DebugLogger:
-    """Set up debug capture for stdout."""
+    """Set up enhanced debug capture focused on agent activity."""
     # Capture stdout (where our print statements go)
-    sys.stdout = DebugCapture(debug_logger.original_stdout, debug_logger, "INFO")
+    sys.stdout = EnhancedDebugCapture(debug_logger.original_stdout, debug_logger, "INFO")
 
     return debug_logger
 
@@ -131,20 +178,35 @@ def debug_success(message: str) -> None:
     debug_print(message, "SUCCESS")
 
 
+def debug_agent(message: str) -> None:
+    """Log agent decision message."""
+    debug_print(message, "AGENT")
+
+
+def debug_climate(message: str) -> None:
+    """Log climate analysis message."""
+    debug_print(message, "CLIMATE")
+
+
 # Test function
 if __name__ == "__main__":
     setup_debug_capture()
 
-    print("Testing debug capture...")
+    print("Testing enhanced debug capture for agent activity...")
     debug_info("This is an info message")
     debug_warning("This is a warning")
     debug_error("This is an error")
     debug_success("This is a success message")
+    debug_agent("AGENT-RESEARCHER: Starting city generation")
+    debug_climate("TEMP-FORECAST: 23.5°C | HISTORICAL: 20.1°C")
 
-    print("DEBUG: This should be captured")
-    print("OpenWeatherMap: This should also be captured")
-    print("Regular message that might not be captured")
+    print("AGENT-PLANNER: Planning strategy")
+    print("CLIMATE-DECISION: MEETS criteria (23.5°C vs 20-25°C target)")
+    print("REASONING: Temperature within target range with good climate score")
+    print("OpenWeatherMap One Call API 3.0 success for Barcelona")
+    print("Regular message that should be filtered out")
+    print("Generated 8 diverse cities across 2 regions")
 
-    print("\nDebug entries:")
+    print("\nDebug entries captured:")
     for entry in debug_logger.get_entries():
         print(f"  {entry}")

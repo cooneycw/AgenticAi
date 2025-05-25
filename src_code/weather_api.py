@@ -1,17 +1,23 @@
 # src_code/weather_api.py
-"""Fixed Weather API Integration - ENHANCED ERROR HANDLING
+"""Fixed Weather API Integration - ONE CALL API 3.0 IMPLEMENTATION
 
-This module fixes the weather API issues by:
-1. Using OpenWeatherMap API (paid service) as primary
-2. Fixing Open-Meteo API parameters as fallback
-3. Better error handling and parameter validation
-4. Proper temperature range handling
-5. Enhanced timeout and retry mechanisms
+This module properly implements OpenWeatherMap One Call API 3.0:
+1. **Correct One Call API 3.0 endpoints and parameters**
+2. **Proper forecast vs historical data handling**
+3. **Enhanced error handling and validation**
+4. **Fixed Open-Meteo fallback with correct parameters**
+5. **Better timeout and retry mechanisms**
+
+FIXED ISSUES:
+- Now uses correct One Call API 3.0 endpoint
+- Proper handling of daily vs hourly forecast data
+- Better error handling for API responses
+- Fixed parameter validation and URL construction
 """
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Dict, Any, Optional
 
 import aiohttp
@@ -28,7 +34,7 @@ async def get_weather_data_enhanced(
         city_name: str = "",
         openweather_key: Optional[str] = None
 ) -> TaskResult:
-    """Enhanced weather data retrieval using multiple APIs with fallbacks."""
+    """Enhanced weather data retrieval using One Call API 3.0 and fallbacks."""
 
     # Input validation
     if not (-90 <= lat <= 90):
@@ -36,18 +42,30 @@ async def get_weather_data_enhanced(
     if not (-180 <= lon <= 180):
         return TaskResult(False, None, f"Invalid longitude: {lon}")
 
-    # Try OpenWeatherMap first (paid service)
+    # Try OpenWeatherMap One Call API 3.0 first (paid service)
     if openweather_key:
-        print(f"DEBUG: Trying OpenWeatherMap API for {city_name}")
+        print(f"DEBUG: Trying OpenWeatherMap One Call API 3.0 for {city_name}")
         try:
-            owm_result = await _get_openweathermap_data(lat, lon, target_date, openweather_key)
+            owm_result = await _get_openweathermap_onecall_v3(lat, lon, target_date, openweather_key)
             if owm_result.success:
-                print(f"DEBUG: OpenWeatherMap success for {city_name}")
+                print(f"DEBUG: OpenWeatherMap One Call API 3.0 success for {city_name}")
                 return owm_result
             else:
-                print(f"DEBUG: OpenWeatherMap failed for {city_name}: {owm_result.error}")
+                print(f"DEBUG: OpenWeatherMap One Call API 3.0 failed for {city_name}: {owm_result.error}")
         except Exception as e:
-            print(f"DEBUG: OpenWeatherMap exception for {city_name}: {e}")
+            print(f"DEBUG: OpenWeatherMap One Call API 3.0 exception for {city_name}: {e}")
+
+        # Fallback to regular forecast API
+        print(f"DEBUG: Trying OpenWeatherMap 5-day forecast API for {city_name}")
+        try:
+            forecast_result = await _get_openweathermap_forecast(lat, lon, target_date, openweather_key)
+            if forecast_result.success:
+                print(f"DEBUG: OpenWeatherMap 5-day forecast success for {city_name}")
+                return forecast_result
+            else:
+                print(f"DEBUG: OpenWeatherMap 5-day forecast failed for {city_name}: {forecast_result.error}")
+        except Exception as e:
+            print(f"DEBUG: OpenWeatherMap 5-day forecast exception for {city_name}: {e}")
 
     # Fallback to fixed Open-Meteo
     print(f"DEBUG: Trying fixed Open-Meteo API for {city_name}")
@@ -66,138 +84,216 @@ async def get_weather_data_enhanced(
     return _get_seasonal_fallback(lat, lon, target_date, city_name)
 
 
-async def _get_openweathermap_data(
+async def _get_openweathermap_onecall_v3(
         lat: float,
         lon: float,
         target_date: datetime,
         api_key: str
 ) -> TaskResult:
-    """Get weather data from OpenWeatherMap API (paid service)."""
+    """Get weather data from OpenWeatherMap One Call API 3.0 (paid service)."""
+    try:
+        days_ahead = (target_date - datetime.now()).days
+
+        if days_ahead < 0:
+            return TaskResult(False, None, "Date in the past")
+        elif days_ahead > 8:  # One Call API 3.0 supports up to 8 days
+            return TaskResult(False, None, f"Date {days_ahead} days ahead (max 8 for One Call API)")
+
+        # Use One Call API 3.0 - correct endpoint and parameters
+        url = "https://api.openweathermap.org/data/3.0/onecall"
+        params = {
+            'lat': f"{lat:.6f}",
+            'lon': f"{lon:.6f}",
+            'appid': api_key,
+            'units': 'metric',
+            'exclude': 'minutely,alerts'  # Exclude minutely data and alerts to reduce response size
+        }
+
+        timeout = aiohttp.ClientTimeout(total=30)  # Increased timeout for One Call API
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.get(url, params=params) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    return _parse_onecall_v3_response(data, target_date, days_ahead)
+                elif response.status == 401:
+                    error_text = "Invalid API key or One Call API 3.0 not subscribed"
+                    return TaskResult(False, None, f"OpenWeatherMap auth error: {error_text}")
+                elif response.status == 402:
+                    error_text = "Payment required - One Call API 3.0 is a paid service"
+                    return TaskResult(False, None, f"OpenWeatherMap payment error: {error_text}")
+                elif response.status == 429:
+                    error_text = "Rate limit exceeded"
+                    return TaskResult(False, None, f"OpenWeatherMap rate limit: {error_text}")
+                else:
+                    error_text = await response.text()
+                    return TaskResult(False, None, f"OpenWeatherMap One Call API HTTP {response.status}: {error_text[:100]}")
+
+    except asyncio.TimeoutError:
+        return TaskResult(False, None, "OpenWeatherMap One Call API timeout")
+    except aiohttp.ClientError as e:
+        return TaskResult(False, None, f"OpenWeatherMap One Call API connection error: {str(e)}")
+    except Exception as e:
+        return TaskResult(False, None, f"OpenWeatherMap One Call API error: {str(e)}")
+
+
+def _parse_onecall_v3_response(data: Dict[str, Any], target_date: datetime, days_ahead: int) -> TaskResult:
+    """Parse OpenWeatherMap One Call API 3.0 response."""
+    try:
+        # One Call API 3.0 provides daily forecasts in the 'daily' array
+        if 'daily' not in data:
+            return TaskResult(False, None, "No daily forecast data in One Call API response")
+
+        daily_forecasts = data['daily']
+        if days_ahead >= len(daily_forecasts):
+            return TaskResult(False, None, f"Date beyond forecast range (available: {len(daily_forecasts)} days)")
+
+        day = daily_forecasts[days_ahead]
+
+        # Validate required fields
+        if 'temp' not in day or 'humidity' not in day:
+            return TaskResult(False, None, "Missing required fields in One Call API daily data")
+
+        try:
+            # Extract temperature data
+            temp_data = day['temp']
+            temp_max = float(temp_data['max'])
+            temp_min = float(temp_data['min'])
+            temp_avg = (temp_max + temp_min) / 2
+
+            # Extract humidity
+            humidity = float(day['humidity'])
+
+            # Extract weather description
+            weather_desc = "Variable conditions"
+            if day.get('weather') and len(day['weather']) > 0:
+                weather_desc = day['weather'][0].get('description', 'Variable conditions').title()
+
+            # Additional One Call API 3.0 data we can use
+            pressure = day.get('pressure', 1013)
+            wind_speed = day.get('wind_speed', 0)
+            clouds = day.get('clouds', 50)
+
+            return TaskResult(True, {
+                "temp_max": round(temp_max, 1),
+                "temp_min": round(temp_min, 1),
+                "temp_avg": round(temp_avg, 1),
+                "humidity": round(humidity, 0),
+                "weather_desc": weather_desc,
+                "pressure": round(pressure, 0),
+                "wind_speed_mps": round(wind_speed, 1),
+                "cloudiness": round(clouds, 0),
+                "data_source": "openweathermap_onecall_v3"
+            })
+
+        except (KeyError, ValueError, TypeError) as e:
+            return TaskResult(False, None, f"Error processing One Call API temperature data: {str(e)}")
+
+    except Exception as e:
+        return TaskResult(False, None, f"One Call API parse error: {str(e)}")
+
+
+async def _get_openweathermap_forecast(
+        lat: float,
+        lon: float,
+        target_date: datetime,
+        api_key: str
+) -> TaskResult:
+    """Get weather data from OpenWeatherMap 5-day forecast API (fallback)."""
     try:
         days_ahead = (target_date - datetime.now()).days
 
         if days_ahead < 0:
             return TaskResult(False, None, "Date in the past")
         elif days_ahead > 5:
-            # Use One Call API 3.0 for extended forecast (paid feature)
-            url = "https://api.openweathermap.org/data/3.0/onecall"
-            params = {
-                'lat': lat,
-                'lon': lon,
-                'appid': api_key,
-                'units': 'metric',
-                'exclude': 'minutely,alerts'
-            }
-        else:
-            # Use 5-day forecast API for near-term
-            url = "https://api.openweathermap.org/data/2.5/forecast"
-            params = {
-                'lat': lat,
-                'lon': lon,
-                'appid': api_key,
-                'units': 'metric'
-            }
+            return TaskResult(False, None, f"Date {days_ahead} days ahead (max 5 for forecast API)")
+
+        # Use 5-day forecast API
+        url = "https://api.openweathermap.org/data/2.5/forecast"
+        params = {
+            'lat': f"{lat:.6f}",
+            'lon': f"{lon:.6f}",
+            'appid': api_key,
+            'units': 'metric'
+        }
 
         timeout = aiohttp.ClientTimeout(total=20)
         async with aiohttp.ClientSession(timeout=timeout) as session:
             async with session.get(url, params=params) as response:
                 if response.status == 200:
                     data = await response.json()
-                    return _parse_openweathermap_response(data, target_date, days_ahead)
+                    return _parse_forecast_response(data, target_date)
                 elif response.status == 401:
                     error_text = "Invalid API key"
-                    return TaskResult(False, None, f"OpenWeatherMap auth error: {error_text}")
+                    return TaskResult(False, None, f"OpenWeatherMap forecast auth error: {error_text}")
                 elif response.status == 429:
                     error_text = "Rate limit exceeded"
-                    return TaskResult(False, None, f"OpenWeatherMap rate limit: {error_text}")
+                    return TaskResult(False, None, f"OpenWeatherMap forecast rate limit: {error_text}")
                 else:
                     error_text = await response.text()
-                    return TaskResult(False, None, f"OpenWeatherMap HTTP {response.status}: {error_text[:100]}")
+                    return TaskResult(False, None, f"OpenWeatherMap forecast HTTP {response.status}: {error_text[:100]}")
 
     except asyncio.TimeoutError:
-        return TaskResult(False, None, "OpenWeatherMap timeout")
+        return TaskResult(False, None, "OpenWeatherMap forecast timeout")
     except aiohttp.ClientError as e:
-        return TaskResult(False, None, f"OpenWeatherMap connection error: {str(e)}")
+        return TaskResult(False, None, f"OpenWeatherMap forecast connection error: {str(e)}")
     except Exception as e:
-        return TaskResult(False, None, f"OpenWeatherMap error: {str(e)}")
+        return TaskResult(False, None, f"OpenWeatherMap forecast error: {str(e)}")
 
 
-def _parse_openweathermap_response(data: Dict[str, Any], target_date: datetime, days_ahead: int) -> TaskResult:
-    """Parse OpenWeatherMap API response."""
+def _parse_forecast_response(data: Dict[str, Any], target_date: datetime) -> TaskResult:
+    """Parse OpenWeatherMap 5-day forecast API response."""
     try:
-        if days_ahead <= 5 and 'list' in data:
-            # 5-day forecast format
-            target_day = target_date.strftime('%Y-%m-%d')
+        if 'list' not in data:
+            return TaskResult(False, None, "No forecast list in API response")
 
-            # Find data for target date
-            day_data = []
-            for item in data['list']:
-                try:
-                    item_date = datetime.fromtimestamp(item['dt']).strftime('%Y-%m-%d')
-                    if item_date == target_day:
-                        day_data.append(item)
-                except (KeyError, ValueError, OSError):
-                    continue
+        target_day = target_date.strftime('%Y-%m-%d')
 
-            if not day_data:
-                return TaskResult(False, None, "No data for target date")
-
-            # Calculate daily averages
+        # Find data for target date
+        day_data = []
+        for item in data['list']:
             try:
-                temps = [item['main']['temp'] for item in day_data if 'main' in item and 'temp' in item['main']]
-                humidities = [item['main']['humidity'] for item in day_data if
-                              'main' in item and 'humidity' in item['main']]
+                item_date = datetime.fromtimestamp(item['dt']).strftime('%Y-%m-%d')
+                if item_date == target_day:
+                    day_data.append(item)
+            except (KeyError, ValueError, OSError):
+                continue
 
-                if not temps:
-                    return TaskResult(False, None, "No temperature data found")
+        if not day_data:
+            return TaskResult(False, None, "No data for target date in forecast")
 
-                temp_max = max(temps)
-                temp_min = min(temps)
-                temp_avg = sum(temps) / len(temps)
-                humidity = sum(humidities) / len(humidities) if humidities else 60
+        # Calculate daily averages from 3-hour forecasts
+        try:
+            temps = [item['main']['temp'] for item in day_data if 'main' in item and 'temp' in item['main']]
+            humidities = [item['main']['humidity'] for item in day_data if
+                          'main' in item and 'humidity' in item['main']]
 
-                # Get weather description
-                weather_desc = "Variable conditions"
-                if day_data[0].get('weather') and len(day_data[0]['weather']) > 0:
-                    weather_desc = day_data[0]['weather'][0].get('description', 'Variable conditions')
+            if not temps:
+                return TaskResult(False, None, "No temperature data found in forecast")
 
-            except (KeyError, ZeroDivisionError, TypeError):
-                return TaskResult(False, None, "Error processing temperature data")
+            temp_max = max(temps)
+            temp_min = min(temps)
+            temp_avg = sum(temps) / len(temps)
+            humidity = sum(humidities) / len(humidities) if humidities else 60
 
-        elif 'daily' in data:
-            # One Call API format
-            try:
-                if days_ahead < len(data['daily']):
-                    day = data['daily'][days_ahead]
-                    if 'temp' not in day or 'humidity' not in day:
-                        return TaskResult(False, None, "Missing required fields in daily data")
+            # Get weather description from first forecast item
+            weather_desc = "Variable conditions"
+            if day_data[0].get('weather') and len(day_data[0]['weather']) > 0:
+                weather_desc = day_data[0]['weather'][0].get('description', 'Variable conditions').title()
 
-                    temp_max = float(day['temp']['max'])
-                    temp_min = float(day['temp']['min'])
-                    temp_avg = (temp_max + temp_min) / 2
-                    humidity = float(day['humidity'])
+            return TaskResult(True, {
+                "temp_max": round(temp_max, 1),
+                "temp_min": round(temp_min, 1),
+                "temp_avg": round(temp_avg, 1),
+                "humidity": round(humidity, 0),
+                "weather_desc": weather_desc,
+                "data_source": "openweathermap_forecast"
+            })
 
-                    weather_desc = "Variable conditions"
-                    if day.get('weather') and len(day['weather']) > 0:
-                        weather_desc = day['weather'][0].get('description', 'Variable conditions')
-                else:
-                    return TaskResult(False, None, "Date beyond forecast range")
-            except (KeyError, ValueError, TypeError, IndexError):
-                return TaskResult(False, None, "Error processing daily forecast data")
-        else:
-            return TaskResult(False, None, "Unexpected API response format")
-
-        return TaskResult(True, {
-            "temp_max": round(temp_max, 1),
-            "temp_min": round(temp_min, 1),
-            "temp_avg": round(temp_avg, 1),
-            "humidity": round(humidity, 0),
-            "weather_desc": weather_desc.title(),
-            "data_source": "openweathermap_paid"
-        })
+        except (KeyError, ZeroDivisionError, TypeError):
+            return TaskResult(False, None, "Error processing forecast temperature data")
 
     except Exception as e:
-        return TaskResult(False, None, f"Parse error: {str(e)}")
+        return TaskResult(False, None, f"Forecast parse error: {str(e)}")
 
 
 async def _get_openmeteo_fixed(lat: float, lon: float, target_date: datetime) -> TaskResult:
@@ -206,15 +302,15 @@ async def _get_openmeteo_fixed(lat: float, lon: float, target_date: datetime) ->
         days_ahead = (target_date - datetime.now()).days
 
         if days_ahead < 0 or days_ahead > 16:
-            return TaskResult(False, None, f"Date {days_ahead} days ahead (out of range)")
+            return TaskResult(False, None, f"Date {days_ahead} days ahead (Open-Meteo range: 0-16)")
 
         ds = target_date.strftime("%Y-%m-%d")
 
-        # Fixed URL with correct parameters (removed problematic humidity parameter)
+        # Fixed URL with correct parameters
         url = (
             "https://api.open-meteo.com/v1/forecast?"
             f"latitude={lat:.6f}&longitude={lon:.6f}"
-            "&daily=temperature_2m_max,temperature_2m_min,weather_code"
+            "&daily=temperature_2m_max,temperature_2m_min,weather_code,relative_humidity_2m_max"
             f"&start_date={ds}&end_date={ds}"
             "&timezone=auto"
         )
@@ -249,8 +345,11 @@ async def _get_openmeteo_fixed(lat: float, lon: float, target_date: datetime) ->
             avg = (hi + lo) / 2
             weather_code = int(daily.get("weather_code", [0])[0])
 
-            # Estimate humidity based on weather code and location
-            humidity = _estimate_humidity_from_weather_code(weather_code, lat)
+            # Get humidity if available, otherwise estimate
+            if "relative_humidity_2m_max" in daily and daily["relative_humidity_2m_max"]:
+                humidity = float(daily["relative_humidity_2m_max"][0])
+            else:
+                humidity = _estimate_humidity_from_weather_code(weather_code, lat)
 
             weather_desc = _weather_code_to_description(weather_code)
 
@@ -378,24 +477,28 @@ def _weather_code_to_description(code: int) -> str:
     return weather_codes.get(code, f"Unknown weather (code {code})")
 
 
-# Test function
+# Test function for debugging
 async def test_weather_apis():
     """Test both weather APIs."""
     # Test coordinates (Toronto)
     lat, lon = 43.6777, -79.6248
-    target_date = datetime.now()
+    target_date = datetime.now() + timedelta(days=3)
 
     from config.config import OPENWEATHER_KEY
 
-    print("Testing weather APIs...")
+    print("Testing enhanced weather APIs with One Call API 3.0...")
 
     result = await get_weather_data_enhanced(lat, lon, target_date, "Toronto", OPENWEATHER_KEY)
 
     if result.success:
         print(f"✅ Success: {result.data['data_source']}")
-        print(f"   Temperature: {result.data['temp_avg']:.1f}°C")
+        print(f"   Temperature: {result.data['temp_avg']:.1f}°C (Range: {result.data['temp_min']:.1f}°C - {result.data['temp_max']:.1f}°C)")
         print(f"   Weather: {result.data['weather_desc']}")
         print(f"   Humidity: {result.data['humidity']:.0f}%")
+        if 'pressure' in result.data:
+            print(f"   Pressure: {result.data['pressure']:.0f} hPa")
+        if 'wind_speed_mps' in result.data:
+            print(f"   Wind: {result.data['wind_speed_mps']:.1f} m/s")
     else:
         print(f"❌ Failed: {result.error}")
 
