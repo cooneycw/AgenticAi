@@ -4,13 +4,15 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="f625d363-face-42b1-9ae4-5a432b3898ad" name="Changes" comment="GPT 4.1 nano.">
-      <change afterPath="$PROJECT_DIR$/config/config.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/src_code/agentic_core.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/src_code/climate_analyzer.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/src_code/shiny_ui.py" afterDir="false" />
+    <list default="true" id="f625d363-face-42b1-9ae4-5a432b3898ad" name="Changes" comment="Modular approach.">
+      <change afterPath="$PROJECT_DIR$/src_code/flight_analyzer.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src_code/itinerary_generator.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src_code/weather_api.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/app.py" beforeDir="false" afterPath="$PROJECT_DIR$/app.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/config/config.py" beforeDir="false" afterPath="$PROJECT_DIR$/config/config.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src_code/agentic_core.py" beforeDir="false" afterPath="$PROJECT_DIR$/src_code/agentic_core.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src_code/climate_analyzer.py" beforeDir="false" afterPath="$PROJECT_DIR$/src_code/climate_analyzer.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src_code/shiny_ui.py" beforeDir="false" afterPath="$PROJECT_DIR$/src_code/shiny_ui.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -76,7 +78,7 @@
       <option name="number" value="Default" />
       <option name="presentableId" value="Default" />
       <updated>1748089690988</updated>
-      <workItem from="1748089692032" duration="23926000" />
+      <workItem from="1748089692032" duration="26342000" />
     </task>
     <task id="LOCAL-00001" summary="Initial commit">
       <option name="closed" value="true" />
@@ -158,7 +160,15 @@
       <option name="project" value="LOCAL" />
       <updated>1748171637964</updated>
     </task>
-    <option name="localTasksCounter" value="11" />
+    <task id="LOCAL-00011" summary="Modular approach.">
+      <option name="closed" value="true" />
+      <created>1748187337602</created>
+      <option name="number" value="00011" />
+      <option name="presentableId" value="LOCAL-00011" />
+      <option name="project" value="LOCAL" />
+      <updated>1748187337602</updated>
+    </task>
+    <option name="localTasksCounter" value="12" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">
@@ -169,6 +179,7 @@
     <MESSAGE value="Dynamic ai." />
     <MESSAGE value="Dynamic ai.  With Flight Radar 24 integration." />
     <MESSAGE value="GPT 4.1 nano." />
-    <option name="LAST_COMMIT_MESSAGE" value="GPT 4.1 nano." />
+    <MESSAGE value="Modular approach." />
+    <option name="LAST_COMMIT_MESSAGE" value="Modular approach." />
   </component>
 </project>
