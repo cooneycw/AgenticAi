@@ -155,7 +155,7 @@ class EnhancedClimateAnalyzer:
             Month: {month_name}"""
 
             response = self.client.chat.completions.create(
-                model="gpt-4.1-nano",
+                model="gpt-4o-mini",  # Using GPT-4o mini (most current efficient model)
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt}
@@ -330,7 +330,7 @@ class EnhancedClimateAnalyzer:
             """
 
             response = self.client.chat.completions.create(
-                model="gpt-4.1-nano",
+                model="gpt-4o-mini",  # Using GPT-4o mini (current efficient model)
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": f"Analyze this weather deviation for travelers:\n\n{deviation_summary}"}
@@ -407,7 +407,7 @@ CRITICAL: temperature_range MUST always be exactly 2 numbers in an array!
 Return only valid JSON, no explanations."""
 
             response = self.client.chat.completions.create(
-                model="gpt-4.1-nano",
+                model="gpt-4o-mini",  # Using GPT-4o mini for efficient query parsing
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": f"Parse this travel query: {query}"}
@@ -607,7 +607,7 @@ Focus on geographical and cultural diversity, not just population size."""
                 temperature = random.uniform(0.7, 0.9)  # Variable creativity
 
                 response = self.client.chat.completions.create(
-                    model="gpt-4.1-nano",
+                    model="gpt-4o-mini",  # Using GPT-4o mini for city generation
                     messages=[
                         {"role": "system", "content": system_prompt},
                         {"role": "user",
@@ -815,7 +815,7 @@ Consider:
 Return only valid JSON, no explanations."""
 
             response = self.client.chat.completions.create(
-                model="gpt-4.1-nano",
+                model="gpt-4",
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": f"Provide seasonal weather estimate for {city_name} in {month}"}
@@ -1292,7 +1292,7 @@ Format as:
 Focus on realistic, enjoyable activities that work well in these specific weather conditions."""
 
             response = self.client.chat.completions.create(
-                model="gpt-4.1-nano",
+                model="gpt-4",
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user",
@@ -1311,9 +1311,9 @@ Focus on realistic, enjoyable activities that work well in these specific weathe
 # Initialize system
 ai_system = StreamingAgenticAISystem(OPENAI_KEY, OPENWEATHER_KEY, FLIGHTRADAR24_KEY) if OPENAI_KEY else None
 
-# Enhanced Streaming UI
+# Enhanced Streaming UI with Larger Display
 app_ui = ui.page_fillable(
-    ui.h1("🚀 Streaming Agentic AI Travel System", class_="text-center mb-4"),
+    ui.h1("🚀 Streaming Agentic AI Travel System", class_="text-center mb-3"),
     ui.p(
         "🌡️ Climate Intelligence • ✈️ Flight Analysis • 🔄 Real-Time Streaming • 🗓️ Weather-Appropriate Itineraries",
         class_="text-center text-muted mb-4"),
@@ -1342,80 +1342,109 @@ app_ui = ui.page_fillable(
             ui.p("✅ Instant Feedback Loop", style="font-size: 0.85em; margin: 2px 0;"),
             ui.p("✅ Enhanced Error Handling", style="font-size: 0.85em; margin: 2px 0;"),
 
-            width=300
+            width=280
         ),
 
         ui.div(
+            # Query Input Section
             ui.div(
                 ui.input_text_area(
                     "user_query",
                     "Enter your travel query for streaming analysis:",
                     placeholder="e.g., 'Find cooler European destinations with 5-15°C in 10 days from Toronto' - watch the real-time agent workflow!",
-                    rows=3,
+                    rows=2,
                     width="100%"
                 ),
-                ui.input_action_button("run_workflow", "🚀 Start Streaming AI Agents", class_="btn-success mb-4"),
-                class_="mb-4"
+                ui.input_action_button("run_workflow", "🚀 Start Streaming AI Agents", class_="btn-success btn-lg mb-3"),
+                class_="mb-3"
             ),
 
-            # Agent Workflow Visual
+            # Status and Workflow Visual
             ui.div(
-                ui.h4("🔄 Agent Workflow Status"),
+                ui.output_ui("status_display"),
+                class_="mb-3"
+            ),
+
+            # Agent Workflow Visual - Compact
+            ui.div(
+                ui.h5("🔄 Agent Workflow Status"),
                 ui.output_ui("workflow_visual"),
-                class_="mb-4"
+                class_="mb-3"
             ),
 
-            # Live Updates Display
-            ui.div(
-                ui.h4("📡 Live Agent Updates"),
-                ui.output_ui("live_updates_display"),
-                class_="mb-4"
-            ),
+            # Main Content Area - Two Column Layout
+            ui.layout_column_wrap(
+                # Left Column: Live Communication Stream
+                ui.div(
+                    ui.h4("📡 Live Agent Communication Stream"),
+                    ui.output_ui("live_updates_display"),
+                    class_="h-100"
+                ),
 
-            # Final Results Display
-            ui.div(
-                ui.h3("🎯 Final Recommendations & Itineraries"),
-                ui.output_ui("final_results_display"),
-                class_="conversation-container"
+                # Right Column: Final Results
+                ui.div(
+                    ui.h4("🎯 Final Recommendations & Results"),
+                    ui.output_ui("final_results_display"),
+                    class_="h-100"
+                ),
+
+                width=(6, 6),  # Equal width columns
+                height="700px"  # Fixed height for scrolling
             )
         )
     ),
 
-    # Enhanced CSS for streaming interface
+    # Enhanced CSS for larger, more visual interface
     ui.tags.style("""
-        .conversation-container {
-            max-height: 600px;
+        /* Main layout improvements */
+        .bslib-page-fillable {
+            min-height: 100vh;
+        }
+
+        /* Live updates container - much larger and more visual */
+        .live-updates-container {
+            height: 600px;
             overflow-y: auto;
-            border: 1px solid #ddd;
+            border: 2px solid #007bff;
+            border-radius: 12px;
+            padding: 20px;
+            background: linear-gradient(135deg, #ffffff 0%, #f8f9fa 100%);
+            font-family: 'Monaco', 'Menlo', 'Courier New', monospace;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+        }
+
+        /* Auto-scroll to bottom for live updates */
+        .live-updates-container {
+            scroll-behavior: smooth;
+        }
+
+        /* Final results container */
+        .conversation-container, .final-results-container {
+            height: 600px;
+            overflow-y: auto;
+            border: 2px solid #28a745;
             border-radius: 12px;
             padding: 20px;
             background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
         }
 
-        .live-updates-container {
-            max-height: 400px;
-            overflow-y: auto;
-            border: 1px solid #ddd;
-            border-radius: 8px;
-            padding: 15px;
-            background: linear-gradient(135deg, #fff 0%, #f8f9fa 100%);
-            font-family: 'Courier New', monospace;
-        }
-
+        /* Workflow visual - more compact */
         .workflow-visual {
-            padding: 15px;
+            padding: 12px;
             background: linear-gradient(135deg, #e3f2fd 0%, #bbdefb 100%);
-            border-radius: 12px;
+            border-radius: 8px;
             border: 1px solid #2196f3;
         }
 
+        /* Agent cards - smaller for compact display */
         .agent-card {
             background: white;
-            border-radius: 8px;
-            padding: 12px;
-            margin: 5px;
+            border-radius: 6px;
+            padding: 8px;
+            margin: 3px;
             text-align: center;
-            min-height: 80px;
+            min-height: 60px;
             display: flex;
             flex-direction: column;
             justify-content: center;
@@ -1423,6 +1452,12 @@ app_ui = ui.page_fillable(
             box-shadow: 0 2px 4px rgba(0,0,0,0.1);
         }
 
+        .agent-card h6 {
+            font-size: 0.8em;
+            margin-bottom: 2px;
+        }
+
+        /* Agent states with better visual feedback */
         .agent-pending {
             background: #f8f9fa;
             color: #6c757d;
@@ -1433,7 +1468,8 @@ app_ui = ui.page_fillable(
             background: linear-gradient(135deg, #007bff, #0056b3);
             color: white;
             border: 2px solid #0056b3;
-            animation: pulse 2s infinite;
+            animation: pulse 1.5s infinite;
+            transform: scale(1.05);
         }
 
         .agent-complete {
@@ -1449,30 +1485,80 @@ app_ui = ui.page_fillable(
         }
 
         @keyframes pulse {
-            0% { transform: scale(1); }
-            50% { transform: scale(1.05); }
-            100% { transform: scale(1); }
+            0% { box-shadow: 0 0 0 0 rgba(0, 123, 255, 0.7); }
+            70% { box-shadow: 0 0 0 10px rgba(0, 123, 255, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(0, 123, 255, 0); }
         }
 
+        /* Update styling for better readability */
         .update-progress { color: #007bff; }
         .update-data { color: #28a745; font-weight: bold; }
         .update-complete { color: #17a2b8; font-weight: bold; }
         .update-error { color: #dc3545; font-weight: bold; }
 
-        .progress-bar {
-            transition: width 0.5s ease;
+        /* Better scrollbars */
+        .live-updates-container::-webkit-scrollbar,
+        .final-results-container::-webkit-scrollbar {
+            width: 8px;
         }
 
-        .btn-outline-info {
-            margin-bottom: 5px;
-            width: 100%;
-            text-align: left;
-            font-size: 0.85em;
+        .live-updates-container::-webkit-scrollbar-track,
+        .final-results-container::-webkit-scrollbar-track {
+            background: #f1f1f1;
+            border-radius: 4px;
         }
 
-        .timestamp {
-            font-size: 0.75em;
-            color: #6c757d;
+        .live-updates-container::-webkit-scrollbar-thumb,
+        .final-results-container::-webkit-scrollbar-thumb {
+            background: #007bff;
+            border-radius: 4px;
+        }
+
+        .live-updates-container::-webkit-scrollbar-thumb:hover,
+        .final-results-container::-webkit-scrollbar-thumb:hover {
+            background: #0056b3;
+        }
+
+        /* Status alerts */
+        .alert {
+            border-radius: 8px;
+            border-width: 2px;
+        }
+
+        /* Button improvements */
+        .btn-lg {
+            padding: 12px 24px;
+            font-size: 1.1em;
+            font-weight: bold;
+        }
+
+        /* Responsive improvements */
+        @media (max-width: 768px) {
+            .live-updates-container,
+            .final-results-container {
+                height: 400px;
+            }
+        }
+
+        /* Typography improvements */
+        .text-monospace {
+            font-family: 'Monaco', 'Menlo', 'Courier New', monospace;
+        }
+
+        /* Animation for new updates */
+        @keyframes slideIn {
+            from {
+                opacity: 0;
+                transform: translateX(-10px);
+            }
+            to {
+                opacity: 1;
+                transform: translateX(0);
+            }
+        }
+
+        .live-updates-container .mb-1:last-child {
+            animation: slideIn 0.3s ease-in;
         }
     """)
 )
@@ -1628,10 +1714,11 @@ def server(input, output, session):
                     'progress': update.progress_pct
                 })
 
-                # Keep only last 50 updates for performance
-                if len(updates_list) > 50:
-                    updates_list = updates_list[-50:]
+                # Keep only last 100 updates for performance (increased from 50)
+                if len(updates_list) > 100:
+                    updates_list = updates_list[-100:]
 
+                # Force reactive update with a new list object
                 live_updates.set(updates_list.copy())
                 print(f"DEBUG: Live updates count: {len(updates_list)}")
 
@@ -1664,13 +1751,33 @@ def server(input, output, session):
                     'timestamp': datetime.now().strftime("%H:%M:%S"),
                     'progress': 0
                 })
-                live_updates.set(updates_list)
+                live_updates.set(updates_list.copy())
             except Exception as update_error:
                 print(f"ERROR: Could not update live_updates: {update_error}")
 
         finally:
             workflow_active.set(False)
             print("DEBUG: Workflow marked as inactive")
+
+    # Auto-scroll JavaScript injection
+    @reactive.Effect
+    def auto_scroll_updates():
+        """Auto-scroll to bottom of live updates when new content arrives"""
+        updates = live_updates.get()
+        if updates:
+            # Inject JavaScript to scroll to bottom
+            ui.insert_ui(
+                ui.tags.script("""
+                    setTimeout(function() {
+                        var container = document.getElementById('live-updates-scroll');
+                        if (container) {
+                            container.scrollTop = container.scrollHeight;
+                        }
+                    }, 100);
+                """),
+                selector="body",
+                where="beforeEnd"
+            )
 
     @output
     @render.ui
@@ -1726,40 +1833,95 @@ def server(input, output, session):
     def live_updates_display():
         """Display live streaming updates"""
         updates = live_updates.get()
+        active = workflow_active.get()
+
+        print(f"DEBUG UI: Rendering live_updates_display with {len(updates)} updates, active={active}")
 
         if not updates:
-            if workflow_active.get():
-                return ui.div("🔄 Waiting for agent updates...", class_="text-center p-3 text-muted")
+            if active:
+                return ui.div(
+                    ui.h5("🔄 Waiting for agent updates...", class_="text-primary"),
+                    ui.p("The streaming workflow is starting...", class_="text-muted"),
+                    class_="text-center p-4 border rounded"
+                )
             else:
-                return ui.div("Ready for streaming workflow...", class_="text-center p-3 text-muted")
+                return ui.div(
+                    ui.h5("📡 Ready for streaming workflow", class_="text-info"),
+                    ui.p("Click 'Start Streaming AI Agents' to see live updates", class_="text-muted"),
+                    class_="text-center p-4 border rounded bg-light"
+                )
 
         elements = []
 
-        # Show recent updates (last 20)
-        recent_updates = updates[-20:] if len(updates) > 20 else updates
+        # Add a header with update count
+        elements.append(
+            ui.div(
+                ui.h5(f"📡 Live Agent Communication ({len(updates)} updates)", class_="text-primary mb-3"),
+                class_="border-bottom pb-2 mb-3"
+            )
+        )
 
-        for update in recent_updates:
+        # Show ALL updates (not just recent 20) for full communication flow
+        for i, update in enumerate(updates):
             # Icon and color based on type
             type_info = {
-                'progress': {'icon': '🔄', 'class': 'update-progress'},
-                'data': {'icon': '✅', 'class': 'update-data'},
-                'complete': {'icon': '🎉', 'class': 'update-complete'},
-                'error': {'icon': '❌', 'class': 'update-error'}
+                'progress': {'icon': '🔄', 'class': 'text-primary fw-normal'},
+                'data': {'icon': '✅', 'class': 'text-success fw-bold'},
+                'complete': {'icon': '🎉', 'class': 'text-info fw-bold'},
+                'error': {'icon': '❌', 'class': 'text-danger fw-bold'}
             }
 
             info = type_info.get(update['type'], {'icon': 'ℹ️', 'class': 'text-muted'})
 
+            # Add agent context
+            agent_icons = {
+                'planner': '🎯',
+                'researcher': '🔍',
+                'analyzer': '📊',
+                'synthesizer': '🎯',
+                'system': '🖥️'
+            }
+
+            agent_icon = agent_icons.get(update.get('agent', 'system'), '•')
+            agent_name = update.get('agent', 'system').title()
+
+            # Create indentation for sub-updates
+            indent = "    " if update['content'].startswith('  ') else ""
+
             elements.append(
                 ui.div(
-                    f"[{update['timestamp']}] {info['icon']} {update['content']}",
-                    class_=f"{info['class']} mb-1",
-                    style="font-size: 0.9em; line-height: 1.4;"
+                    ui.div(
+                        ui.span(f"[{update['timestamp']}]", class_="text-muted small me-2"),
+                        ui.span(f"{agent_icon} {agent_name}:", class_="fw-bold me-2"),
+                        ui.span(f"{info['icon']}", class_="me-1"),
+                        ui.span(f"{indent}{update['content']}", class_=info['class']),
+                        class_="d-flex align-items-start"
+                    ),
+                    class_="mb-1 p-1 border-start border-2 border-light ps-3",
+                    style="font-family: 'Courier New', monospace; font-size: 0.85em; line-height: 1.3;"
+                )
+            )
+
+        # Auto-scroll indicator
+        if active:
+            elements.append(
+                ui.div(
+                    ui.div("🔄 Live streaming in progress...", class_="text-primary small"),
+                    class_="text-center p-2 mt-2 bg-light rounded"
+                )
+            )
+        else:
+            elements.append(
+                ui.div(
+                    ui.div("✅ Streaming complete", class_="text-success small"),
+                    class_="text-center p-2 mt-2 bg-success-subtle rounded"
                 )
             )
 
         return ui.div(
             *elements,
-            class_="live-updates-container"
+            class_="live-updates-container",
+            id="live-updates-scroll"
         )
 
     @output
@@ -1768,9 +1930,14 @@ def server(input, output, session):
         """Display final results and recommendations"""
         results = final_results.get()
 
+        print(f"DEBUG UI: Rendering final_results_display with keys: {list(results.keys())}")
+
         if not results:
-            return ui.div("Final results will appear here after workflow completion...",
-                          class_="text-center p-4 text-muted")
+            return ui.div(
+                ui.h5("⏳ Awaiting Results", class_="text-info"),
+                ui.p("Final results will appear here after workflow completion...", class_="text-muted"),
+                class_="text-center p-4 border rounded bg-light"
+            )
 
         elements = []
 
@@ -1782,40 +1949,36 @@ def server(input, output, session):
             climate_summary = synth_data.get('climate_summary', {})
 
             if recommendations:
-                elements.append(ui.h4("🏆 Top Recommendations"))
+                elements.append(
+                    ui.div(
+                        ui.h4("🏆 Top Recommendations", class_="text-success"),
+                        class_="border-bottom pb-2 mb-3"
+                    )
+                )
 
                 for i, dest in enumerate(recommendations[:3], 1):
                     city_name = dest['city'].split(',')[0]
                     status = "🎯" if dest.get('meets_criteria') else "⭐"
                     score = dest.get('overall_score', 0)
 
-                    # Climate indicators
-                    indicators = []
-                    if dest.get('climate_bonus', 0) > 0:
-                        indicators.append("🌟")
-                    if dest.get('climate_penalty', 0) > 0:
-                        indicators.append("⚡")
-
-                    indicator_str = "".join(indicators)
+                    # Create recommendation card
+                    card_class = "border-success" if dest.get('meets_criteria') else "border-warning"
 
                     elements.append(
                         ui.div(
-                            ui.h5(f"{i}. {status} {city_name} {indicator_str} (Score: {score:.1f}/10)"),
-                            ui.p(
-                                f"🌡️ {dest['temp_avg']:.1f}°C | ✈️ {dest.get('flight_time_display', 'N/A')} | 💧 {dest['humidity']:.0f}%"),
-                            ui.p(f"📍 {dest['weather_desc']} | 🛫 {dest.get('routing', 'N/A')}"),
-
-                            # Add itinerary if available
                             ui.div(
-                                ui.h6(f"🗓️ 4-Day Weather-Appropriate Itinerary:"),
+                                ui.h5(f"{i}. {status} {city_name} (Score: {score:.1f}/10)", class_="card-title"),
                                 ui.div(
-                                    itineraries.get(city_name, "Itinerary not available"),
-                                    style="white-space: pre-wrap; background: #f8f9fa; padding: 15px; border-radius: 8px; font-family: 'Courier New', monospace; font-size: 0.85em;"
+                                    ui.p(f"🌡️ Temperature: {dest['temp_avg']:.1f}°C", class_="mb-1"),
+                                    ui.p(f"✈️ Flight Time: {dest.get('flight_time_display', 'N/A')}", class_="mb-1"),
+                                    ui.p(f"💧 Humidity: {dest['humidity']:.0f}%", class_="mb-1"),
+                                    ui.p(f"📍 Weather: {dest['weather_desc']}", class_="mb-1"),
+                                    ui.p(f"🛫 Routing: {dest.get('routing', 'N/A')}", class_="mb-0"),
+                                    class_="small text-muted"
                                 ),
-                                class_="mt-2"
-                            ) if city_name in itineraries else ui.div(),
-
-                            class_="alert alert-success mb-3 p-3"
+                                class_="card-body p-3"
+                            ),
+                            class_=f"card {card_class} mb-3"
                         )
                     )
 
@@ -1823,17 +1986,24 @@ def server(input, output, session):
                 if climate_summary:
                     elements.append(
                         ui.div(
-                            ui.h5("🌡️ Climate Analysis Summary"),
-                            ui.p(
-                                f"• Climate alerts: {climate_summary.get('total_alerts', 0)} destinations with unusual weather"),
-                            ui.p(f"• Meeting criteria: {climate_summary.get('meeting_criteria', 0)} destinations"),
-                            ui.p(f"• Itineraries generated: {len(itineraries)} detailed weather-appropriate plans"),
+                            ui.h5("🌡️ Climate Analysis Summary", class_="text-info"),
+                            ui.ul(
+                                ui.li(
+                                    f"Climate alerts: {climate_summary.get('total_alerts', 0)} destinations with unusual weather"),
+                                ui.li(f"Meeting criteria: {climate_summary.get('meeting_criteria', 0)} destinations"),
+                                ui.li(f"Analysis complete with enhanced scoring"),
+                                class_="mb-0"
+                            ),
                             class_="alert alert-info p-3"
                         )
                     )
             else:
                 elements.append(
-                    ui.div("No suitable recommendations found.", class_="alert alert-warning p-3")
+                    ui.div(
+                        ui.h5("⚠️ No Suitable Destinations", class_="text-warning"),
+                        ui.p("No destinations met the specified criteria."),
+                        class_="alert alert-warning p-3"
+                    )
                 )
 
         # Show partial results if workflow is incomplete
@@ -1842,7 +2012,13 @@ def server(input, output, session):
             analyzed_destinations = analyzer_data.get('analyzed_destinations', [])
 
             if analyzed_destinations:
-                elements.append(ui.h4("📊 Analysis Results (Partial)"))
+                elements.append(
+                    ui.div(
+                        ui.h4("📊 Analysis Results (In Progress)", class_="text-warning"),
+                        class_="border-bottom pb-2 mb-3"
+                    )
+                )
+
                 for dest in analyzed_destinations[:5]:
                     city_name = dest['city'].split(',')[0]
                     score = dest.get('overall_score', 0)
@@ -1850,8 +2026,10 @@ def server(input, output, session):
 
                     status = "✅" if meets_criteria else "⚠️"
                     elements.append(
-                        ui.div(f"{status} {city_name}: Score {score:.1f}/10",
-                               class_="alert alert-secondary mb-1 p-2")
+                        ui.div(
+                            f"{status} {city_name}: Score {score:.1f}/10",
+                            class_="alert alert-secondary mb-1 p-2 small"
+                        )
                     )
 
         elif 'researcher' in results:
@@ -1859,13 +2037,36 @@ def server(input, output, session):
             flight_results = research_data.get('flight_results', [])
 
             if flight_results:
-                elements.append(ui.h4("🔍 Research Results (Partial)"))
-                elements.append(ui.p(f"Found {len(flight_results)} destinations with complete weather and flight data"))
+                elements.append(
+                    ui.div(
+                        ui.h4("🔍 Research Results (In Progress)", class_="text-info"),
+                        ui.p(f"Found {len(flight_results)} destinations with complete weather and flight data"),
+                        class_="alert alert-info p-3"
+                    )
+                )
+
+        elif 'planner' in results:
+            elements.append(
+                ui.div(
+                    ui.h4("🎯 Query Parsed", class_="text-primary"),
+                    ui.p("Travel query successfully parsed, starting research..."),
+                    class_="alert alert-primary p-3"
+                )
+            )
 
         if not elements:
-            elements.append(ui.div("Processing results...", class_="text-center p-3 text-muted"))
+            elements.append(
+                ui.div(
+                    ui.h5("🔄 Processing Results", class_="text-info"),
+                    ui.p("Results are being processed...", class_="text-muted"),
+                    class_="text-center p-3"
+                )
+            )
 
-        return ui.div(*elements)
+        return ui.div(
+            *elements,
+            class_="final-results-container"
+        )
 
     @output
     @render.ui

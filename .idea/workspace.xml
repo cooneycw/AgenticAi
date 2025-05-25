@@ -4,10 +4,7 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="f625d363-face-42b1-9ae4-5a432b3898ad" name="Changes" comment="Dynamic ai.  With Flight Radar 24 integration.">
-      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/app.py" beforeDir="false" afterPath="$PROJECT_DIR$/app.py" afterDir="false" />
-    </list>
+    <list default="true" id="f625d363-face-42b1-9ae4-5a432b3898ad" name="Changes" comment="GPT 4.1 nano." />
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
     <option name="HIGHLIGHT_NON_ACTIVE_CHANGELIST" value="false" />
@@ -72,7 +69,7 @@
       <option name="number" value="Default" />
       <option name="presentableId" value="Default" />
       <updated>1748089690988</updated>
-      <workItem from="1748089692032" duration="18201000" />
+      <workItem from="1748089692032" duration="18544000" />
     </task>
     <task id="LOCAL-00001" summary="Initial commit">
       <option name="closed" value="true" />
@@ -138,7 +135,15 @@
       <option name="project" value="LOCAL" />
       <updated>1748128032702</updated>
     </task>
-    <option name="localTasksCounter" value="9" />
+    <task id="LOCAL-00009" summary="GPT 4.1 nano.">
+      <option name="closed" value="true" />
+      <created>1748171028104</created>
+      <option name="number" value="00009" />
+      <option name="presentableId" value="LOCAL-00009" />
+      <option name="project" value="LOCAL" />
+      <updated>1748171028104</updated>
+    </task>
+    <option name="localTasksCounter" value="10" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">
@@ -148,6 +153,7 @@
     <MESSAGE value="Initial commit" />
     <MESSAGE value="Dynamic ai." />
     <MESSAGE value="Dynamic ai.  With Flight Radar 24 integration." />
-    <option name="LAST_COMMIT_MESSAGE" value="Dynamic ai.  With Flight Radar 24 integration." />
+    <MESSAGE value="GPT 4.1 nano." />
+    <option name="LAST_COMMIT_MESSAGE" value="GPT 4.1 nano." />
   </component>
 </project>
