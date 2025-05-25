@@ -3,7 +3,7 @@ import asyncio
 import json
 import time
 from datetime import datetime, timedelta, date
-from typing import List, Dict, Any, Optional, Tuple
+from typing import List, Dict, Any, Optional, Tuple, AsyncGenerator
 from dataclasses import dataclass, asdict
 from enum import Enum
 import openai
@@ -40,6 +40,21 @@ class AgentMessage:
     timestamp: datetime
     tools_used: List[str] = None
     metadata: Dict[str, Any] = None
+
+
+@dataclass
+class AgentUpdate:
+    """Real-time updates from agents"""
+    agent_role: AgentRole
+    update_type: str  # "progress", "data", "complete", "error"
+    content: str
+    data: Dict[str, Any] = None
+    progress_pct: float = 0.0
+    timestamp: datetime = None
+
+    def __post_init__(self):
+        if self.timestamp is None:
+            self.timestamp = datetime.now()
 
 
 @dataclass
@@ -140,7 +155,7 @@ class EnhancedClimateAnalyzer:
             Month: {month_name}"""
 
             response = self.client.chat.completions.create(
-                model="gpt-4",
+                model="gpt-4.1-nano",
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt}
@@ -315,7 +330,7 @@ class EnhancedClimateAnalyzer:
             """
 
             response = self.client.chat.completions.create(
-                model="gpt-4",
+                model="gpt-4.1-nano",
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": f"Analyze this weather deviation for travelers:\n\n{deviation_summary}"}
@@ -343,7 +358,7 @@ class EnhancedClimateAnalyzer:
             }
 
 
-class AgenticAISystem:
+class StreamingAgenticAISystem:
     def __init__(self, openai_key: str, openweather_key: str = None, flightradar24_key: str = None):
         self.client = OpenAI(api_key=openai_key)
         self.openweather_key = openweather_key
@@ -392,7 +407,7 @@ CRITICAL: temperature_range MUST always be exactly 2 numbers in an array!
 Return only valid JSON, no explanations."""
 
             response = self.client.chat.completions.create(
-                model="gpt-4",
+                model="gpt-4.1-nano",
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": f"Parse this travel query: {query}"}
@@ -592,7 +607,7 @@ Focus on geographical and cultural diversity, not just population size."""
                 temperature = random.uniform(0.7, 0.9)  # Variable creativity
 
                 response = self.client.chat.completions.create(
-                    model="gpt-4",
+                    model="gpt-4.1-nano",
                     messages=[
                         {"role": "system", "content": system_prompt},
                         {"role": "user",
@@ -800,7 +815,7 @@ Consider:
 Return only valid JSON, no explanations."""
 
             response = self.client.chat.completions.create(
-                model="gpt-4",
+                model="gpt-4.1-nano",
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": f"Provide seasonal weather estimate for {city_name} in {month}"}
@@ -925,138 +940,6 @@ Return only valid JSON, no explanations."""
         key = (city.lower(), country.lower())
         return city_airport_map.get(key)
 
-    async def call_flightradar24_api(self, origin_airport: str, dest_airport: str) -> Dict[str, Any]:
-        """Call FlightRadar24 API for real flight data"""
-        if not self.flightradar24_key:
-            return {"error": "FlightRadar24 API key not available", "fallback": True}
-
-        try:
-            import aiohttp
-
-            # FR24 API endpoint for route information
-            url = f"https://api.flightradar24.com/common/v1/search.json"
-            headers = {
-                'Authorization': f'Bearer {self.flightradar24_key}',
-                'User-Agent': 'AgenticAI-Travel/1.0'
-            }
-
-            # Search for flights between airports
-            params = {
-                'query': f"{origin_airport}-{dest_airport}",
-                'limit': 10
-            }
-
-            async with aiohttp.ClientSession() as session:
-                async with session.get(url, headers=headers, params=params) as response:
-                    if response.status == 200:
-                        fr24_data = await response.json()
-                        return {
-                            "success": True,
-                            "raw_data": fr24_data,
-                            "api_response_code": response.status
-                        }
-                    else:
-                        return {
-                            "error": f"FR24 API error: HTTP {response.status}",
-                            "fallback": True,
-                            "api_response_code": response.status
-                        }
-
-        except Exception as e:
-            return {
-                "error": f"FR24 API call failed: {str(e)}",
-                "fallback": True
-            }
-
-    async def get_flight_schedules_fr24(self, origin_airport: str, dest_airport: str) -> Dict[str, Any]:
-        """Get flight schedules from FlightRadar24 API"""
-        if not self.flightradar24_key:
-            return {"error": "FlightRadar24 API key not available", "fallback": True}
-
-        try:
-            import aiohttp
-
-            # Alternative FR24 endpoint for schedules
-            url = f"https://api.flightradar24.com/common/v1/airport.json"
-            headers = {
-                'Authorization': f'Bearer {self.flightradar24_key}',
-                'User-Agent': 'AgenticAI-Travel/1.0'
-            }
-
-            params = {
-                'code': origin_airport,
-                'plugin[]': ['schedule', 'runways', 'arrivals', 'departures'],
-                'page': 1,
-                'limit': 25,
-                'token': self.flightradar24_key
-            }
-
-            async with aiohttp.ClientSession() as session:
-                async with session.get(url, headers=headers, params=params) as response:
-                    if response.status == 200:
-                        schedule_data = await response.json()
-                        return {
-                            "success": True,
-                            "raw_schedule_data": schedule_data,
-                            "api_response_code": response.status
-                        }
-                    else:
-                        return {
-                            "error": f"FR24 Schedule API error: HTTP {response.status}",
-                            "fallback": True
-                        }
-
-        except Exception as e:
-            return {
-                "error": f"FR24 Schedule API failed: {str(e)}",
-                "fallback": True
-            }
-
-    def parse_fr24_flight_data(self, fr24_response: Dict[str, Any], origin_airport: str, dest_airport: str) -> Dict[
-        str, Any]:
-        """Parse FlightRadar24 API response to extract useful flight information"""
-        try:
-            if not fr24_response.get("success"):
-                return {"parsed": False, "error": "FR24 API call failed"}
-
-            raw_data = fr24_response.get("raw_data", {})
-
-            # Extract flight information from FR24 response
-            flights = []
-            airlines = set()
-            total_flights = 0
-
-            # FR24 API structure varies, adapt based on actual response
-            if "results" in raw_data:
-                for result in raw_data.get("results", [])[:10]:  # Limit to top 10
-                    if result.get("type") == "flight":
-                        flight_info = {
-                            "flight_number": result.get("id", "Unknown"),
-                            "airline": result.get("airline", {}).get("name", "Unknown"),
-                            "aircraft": result.get("aircraft", {}).get("model", "Unknown"),
-                            "duration": result.get("time", {}).get("scheduled", {}).get("duration", 0),
-                            "departure_time": result.get("time", {}).get("scheduled", {}).get("departure"),
-                            "arrival_time": result.get("time", {}).get("scheduled", {}).get("arrival"),
-                        }
-                        flights.append(flight_info)
-                        airlines.add(flight_info["airline"])
-                        total_flights += 1
-
-            return {
-                "parsed": True,
-                "total_flights_found": total_flights,
-                "airlines": list(airlines),
-                "flight_details": flights,
-                "route": f"{origin_airport} → {dest_airport}",
-                "data_source": "FlightRadar24 API"
-            }
-
-        except Exception as e:
-            return {
-                "parsed": False,
-                "error": f"Failed to parse FR24 data: {str(e)}"
-            }
-
     async def calculate_flight_info(self, origin_city: str, dest_city: str, dest_country: str) -> Dict[str, Any]:
         """Enhanced flight information with real FR24 API data"""
         try:
@@ -1086,54 +969,6 @@ Return only valid JSON, no explanations."""
                 dest_coords['lat'], dest_coords['lon']
             )
 
-            # Initialize result with basic data
-            result = {
-                'distance_km': distance_km,
-                'origin': origin_city,
-                'destination': f"{dest_city}, {dest_country}",
-                'origin_airport': origin_airport or "Unknown",
-                'dest_airport': dest_airport or "Unknown",
-                'fr24_data_available': False,
-                'fr24_raw_response': None,
-                'fr24_parsed_data': None,
-                'recommended_flights': [],
-                'api_status': "not_attempted"
-            }
-
-            # Try to get real flight data from FR24 API if we have airport codes
-            if origin_airport and dest_airport and self.flightradar24_key:
-                result['api_status'] = "attempting_fr24"
-
-                # Call FR24 API for flight data
-                fr24_response = await self.call_flightradar24_api(origin_airport, dest_airport)
-                result['fr24_raw_response'] = fr24_response
-
-                if fr24_response.get("success"):
-                    result['fr24_data_available'] = True
-                    result['api_status'] = "fr24_success"
-
-                    # Parse the FR24 data
-                    parsed_data = self.parse_fr24_flight_data(fr24_response, origin_airport, dest_airport)
-                    result['fr24_parsed_data'] = parsed_data
-
-                    if parsed_data.get("parsed"):
-                        # Generate flight recommendations based on FR24 data
-                        result['recommended_flights'] = self.generate_flight_recommendations(
-                            parsed_data, distance_km
-                        )
-                else:
-                    result['api_status'] = f"fr24_failed: {fr24_response.get('error', 'Unknown error')}"
-
-                # Also try to get schedule data
-                schedule_response = await self.get_flight_schedules_fr24(origin_airport, dest_airport)
-                result['fr24_schedule_data'] = schedule_response
-
-            else:
-                if not self.flightradar24_key:
-                    result['api_status'] = "no_fr24_key"
-                elif not origin_airport or not dest_airport:
-                    result['api_status'] = f"missing_airports: {origin_airport or 'origin'}, {dest_airport or 'dest'}"
-
             # Always set fallback geographic estimates (ensure consistent data structure)
             if distance_km < 1500:
                 flight_time = distance_km / 700 + 0.5
@@ -1148,88 +983,24 @@ Return only valid JSON, no explanations."""
             hours = int(flight_time)
             minutes = int((flight_time - hours) * 60)
 
-            # Always set these fields regardless of FR24 status
-            result.update({
+            # Initialize result with basic data
+            result = {
+                'distance_km': distance_km,
+                'origin': origin_city,
+                'destination': f"{dest_city}, {dest_country}",
+                'origin_airport': origin_airport or "Unknown",
+                'dest_airport': dest_airport or "Unknown",
+                'fr24_data_available': False,
                 'flight_time_hours': flight_time,
                 'flight_time_display': f"{hours}h {minutes}m",
                 'routing': routing,
-                'data_source': 'fr24_enhanced' if result['fr24_data_available'] else 'geographic_estimate'
-            })
-
-            # If FR24 data is available, potentially override with more accurate timing
-            if result['fr24_data_available'] and result.get('recommended_flights'):
-                # Use the best flight recommendation for timing if available
-                best_flight = result['recommended_flights'][0] if result['recommended_flights'] else {}
-                if best_flight.get('duration_hours') and best_flight['duration_hours'] > 0:
-                    result.update({
-                        'flight_time_hours': best_flight['duration_hours'],
-                        'flight_time_display': best_flight['duration_display'],
-                        'data_source': 'fr24_real_data'
-                    })
+                'data_source': 'geographic_estimate'
+            }
 
             return result
 
         except Exception as e:
             return {"error": f"Enhanced flight calculation failed: {str(e)}"}
-
-    def generate_flight_recommendations(self, parsed_data: Dict[str, Any], distance_km: float) -> List[Dict[str, Any]]:
-        """Generate flight recommendations based on FR24 data"""
-        try:
-            recommendations = []
-
-            if not parsed_data.get("parsed") or not parsed_data.get("flight_details"):
-                return recommendations
-
-            flights = parsed_data["flight_details"]
-
-            # Sort flights by duration (shortest first) and add reliability scoring
-            for flight in flights:
-                duration_minutes = flight.get("duration", 0)
-                if duration_minutes > 0:
-                    duration_hours = duration_minutes / 60
-
-                    # Calculate recommendation score (0-10)
-                    # Factors: flight duration, airline reputation, frequency
-                    duration_score = max(0, 10 - (duration_hours / 15))  # Shorter = better
-
-                    # Simple airline reliability scoring (could be enhanced with real data)
-                    airline = flight.get("airline", "").lower()
-                    if any(carrier in airline for carrier in ["lufthansa", "swiss", "klm", "air canada"]):
-                        reliability_score = 9
-                    elif any(carrier in airline for carrier in ["british airways", "air france", "delta"]):
-                        reliability_score = 8
-                    elif any(carrier in airline for carrier in ["united", "american", "iberia"]):
-                        reliability_score = 7
-                    else:
-                        reliability_score = 6
-
-                    overall_score = (duration_score * 0.6) + (reliability_score * 0.4)
-
-                    recommendations.append({
-                        "flight_number": flight["flight_number"],
-                        "airline": flight["airline"],
-                        "aircraft": flight["aircraft"],
-                        "duration_hours": duration_hours,
-                        "duration_display": f"{int(duration_hours)}h {int((duration_hours % 1) * 60)}m",
-                        "departure_time": flight.get("departure_time"),
-                        "arrival_time": flight.get("arrival_time"),
-                        "reliability_score": reliability_score,
-                        "duration_score": duration_score,
-                        "overall_score": overall_score,
-                        "recommendation_rank": 0  # Will be set after sorting
-                    })
-
-            # Sort by overall score (highest first)
-            recommendations.sort(key=lambda x: x["overall_score"], reverse=True)
-
-            # Add ranking
-            for i, rec in enumerate(recommendations):
-                rec["recommendation_rank"] = i + 1
-
-            return recommendations[:5]  # Return top 5 recommendations
-
-        except Exception as e:
-            return [{"error": f"Failed to generate recommendations: {str(e)}"}]
 
     def _calculate_distance(self, lat1: float, lon1: float, lat2: float, lon2: float) -> float:
         """Calculate distance using Haversine formula"""
@@ -1242,6 +1013,240 @@ Return only valid JSON, no explanations."""
         c = 2 * math.asin(math.sqrt(a))
         r = 6371  # Earth's radius in km
         return c * r
+
+    async def stream_agent_workflow(self, user_query: str) -> AsyncGenerator[AgentUpdate, None]:
+        """Stream real-time updates from the agentic workflow"""
+
+        try:
+            print(f"DEBUG: stream_agent_workflow started for query: {user_query}")
+
+            # Step 1: Parse the query
+            yield AgentUpdate(AgentRole.PLANNER, "progress", "🎯 Parsing travel query...", progress_pct=5.0)
+            print("DEBUG: Yielded planner progress update")
+
+            parsed_query = await self.parse_travel_query(user_query)
+            temp_min, temp_max = self.safe_get_temp_range(parsed_query)
+
+            yield AgentUpdate(AgentRole.PLANNER, "complete",
+                              f"✅ Query parsed: {', '.join(parsed_query.regions)}, {temp_min}-{temp_max}°C, {parsed_query.forecast_date}",
+                              data={"parsed_query": asdict(parsed_query)}, progress_pct=100.0)
+            print("DEBUG: Yielded planner complete update")
+
+            # Step 2: Research Phase with streaming updates
+            yield AgentUpdate(AgentRole.RESEARCHER, "progress", "🔍 Starting enhanced research...", progress_pct=5.0)
+            print("DEBUG: Yielded researcher start update")
+
+            # Generate cities
+            yield AgentUpdate(AgentRole.RESEARCHER, "progress",
+                              f"🌍 Generating diverse cities for {', '.join(parsed_query.regions)}...",
+                              progress_pct=15.0)
+
+            try:
+                cities = await self.get_cities_for_regions(parsed_query.regions,
+                                                           8)  # Reduced from 12 to 8 for faster processing
+                print(f"DEBUG: Generated {len(cities)} cities")
+                yield AgentUpdate(AgentRole.RESEARCHER, "data",
+                                  f"✅ Found {len(cities)} diverse cities: {', '.join([c['city'] for c in cities[:3]])}...",
+                                  data={"cities": cities}, progress_pct=25.0)
+            except Exception as e:
+                print(f"DEBUG: City generation failed: {e}")
+                yield AgentUpdate(AgentRole.RESEARCHER, "error", f"❌ City generation failed: {str(e)}",
+                                  progress_pct=25.0)
+                return
+
+            # Weather analysis with streaming - simplified for debugging
+            weather_results = []
+            climate_alerts = []
+            total_cities = min(len(cities), 6)  # Limit to 6 cities for faster processing
+            cities = cities[:total_cities]
+
+            yield AgentUpdate(AgentRole.RESEARCHER, "progress",
+                              f"🌡️ Starting weather analysis for {total_cities} cities on {parsed_query.forecast_date}...",
+                              progress_pct=30.0)
+
+            for i, city_data in enumerate(cities):
+                progress = 30.0 + (i / total_cities) * 40.0  # 30% to 70%
+
+                yield AgentUpdate(AgentRole.RESEARCHER, "progress",
+                                  f"  🌡️ Analyzing {city_data['city']}... ({i + 1}/{total_cities})",
+                                  progress_pct=progress)
+
+                try:
+                    # Simplified weather analysis for debugging
+                    coords = await self.get_city_coordinates(city_data['city'], city_data['country'])
+                    if coords:
+                        # Use simpler weather method first to isolate issues
+                        weather_result = await self.get_weather_forecast(
+                            coords['lat'], coords['lon'],
+                            f"{city_data['city']}, {city_data['country']}",
+                            parsed_query.forecast_date_parsed
+                        )
+
+                        if weather_result.success:
+                            weather_results.append(weather_result.data)
+                            temp = weather_result.data['temp_avg']
+
+                            yield AgentUpdate(AgentRole.RESEARCHER, "data",
+                                              f"    ✅ {city_data['city']}: {temp:.1f}°C",
+                                              data={"latest_weather": weather_result.data},
+                                              progress_pct=progress)
+                        else:
+                            yield AgentUpdate(AgentRole.RESEARCHER, "progress",
+                                              f"    ❌ {city_data['city']}: Weather failed",
+                                              progress_pct=progress)
+                    else:
+                        yield AgentUpdate(AgentRole.RESEARCHER, "progress",
+                                          f"    ❌ {city_data['city']}: No coordinates",
+                                          progress_pct=progress)
+                except Exception as e:
+                    print(f"DEBUG: Weather analysis failed for {city_data['city']}: {e}")
+                    yield AgentUpdate(AgentRole.RESEARCHER, "progress",
+                                      f"    ❌ {city_data['city']}: {str(e)[:30]}",
+                                      progress_pct=progress)
+
+            print(f"DEBUG: Weather analysis complete, {len(weather_results)} successful")
+
+            # Simplified flight analysis
+            yield AgentUpdate(AgentRole.RESEARCHER, "progress",
+                              f"✈️ Starting flight analysis from {parsed_query.origin_city}...", progress_pct=70.0)
+
+            flight_results = []
+            for i, weather_data in enumerate(weather_results):
+                city_name = weather_data['city'].split(',')[0].strip()
+                country_name = weather_data['city'].split(',')[1].strip() if ',' in weather_data['city'] else ""
+
+                progress = 70.0 + (i / len(weather_results)) * 20.0  # 70% to 90%
+                yield AgentUpdate(AgentRole.RESEARCHER, "progress",
+                                  f"  🛫 Flight analysis: {city_name}... ({i + 1}/{len(weather_results)})",
+                                  progress_pct=progress)
+
+                try:
+                    flight_info = await self.calculate_flight_info(parsed_query.origin_city, city_name, country_name)
+                    if 'error' not in flight_info:
+                        combined_data = {**weather_data, **flight_info}
+                        flight_results.append(combined_data)
+
+                        flight_time = flight_info.get('flight_time_display', 'Unknown')
+                        yield AgentUpdate(AgentRole.RESEARCHER, "data",
+                                          f"    ✅ {city_name}: {flight_time}",
+                                          data={"latest_flight": combined_data},
+                                          progress_pct=progress)
+                    else:
+                        yield AgentUpdate(AgentRole.RESEARCHER, "progress",
+                                          f"    ❌ {city_name}: Flight calculation failed",
+                                          progress_pct=progress)
+                except Exception as e:
+                    print(f"DEBUG: Flight analysis failed for {city_name}: {e}")
+                    yield AgentUpdate(AgentRole.RESEARCHER, "progress",
+                                      f"    ❌ {city_name}: Flight error",
+                                      progress_pct=progress)
+
+            # Research summary
+            yield AgentUpdate(AgentRole.RESEARCHER, "complete",
+                              f"🎉 Research complete! {len(flight_results)} destinations ready",
+                              data={"flight_results": flight_results, "climate_alerts": climate_alerts},
+                              progress_pct=100.0)
+
+            print(f"DEBUG: Research phase complete with {len(flight_results)} results")
+
+            # Step 3: Analysis Phase - Simplified
+            yield AgentUpdate(AgentRole.ANALYZER, "progress", "📊 Starting enhanced analysis...", progress_pct=10.0)
+
+            if not flight_results:
+                yield AgentUpdate(AgentRole.ANALYZER, "error", "❌ No flight results to analyze", progress_pct=100.0)
+                return
+
+            analyzed_destinations = []
+            meeting_criteria = 0
+
+            for i, dest in enumerate(flight_results):
+                progress = 10.0 + (i / len(flight_results)) * 80.0
+                city_name = dest['city'].split(',')[0]
+
+                yield AgentUpdate(AgentRole.ANALYZER, "progress",
+                                  f"  📊 Analyzing {city_name}... ({i + 1}/{len(flight_results)})",
+                                  progress_pct=progress)
+
+                try:
+                    # Simplified scoring
+                    meets_temp = temp_min <= dest['temp_avg'] <= temp_max
+                    if meets_temp:
+                        meeting_criteria += 1
+
+                    # Simple scoring algorithm
+                    temp_score = 10 if meets_temp else max(0, 10 - abs(dest['temp_avg'] - (temp_min + temp_max) / 2))
+                    flight_score = max(0, 10 - (dest.get('flight_time_hours', 8.0) / 15))
+                    overall_score = (temp_score * 0.6) + (flight_score * 0.4)
+
+                    analyzed_destinations.append({
+                        **dest,
+                        'meets_criteria': meets_temp,
+                        'temp_score': temp_score,
+                        'flight_score': flight_score,
+                        'overall_score': overall_score
+                    })
+
+                    status = "✅" if meets_temp else "⚠️"
+                    yield AgentUpdate(AgentRole.ANALYZER, "data",
+                                      f"    {status} {city_name}: Score {overall_score:.1f}/10",
+                                      data={"analyzed_city": analyzed_destinations[-1]},
+                                      progress_pct=progress)
+                except Exception as e:
+                    print(f"DEBUG: Analysis failed for {city_name}: {e}")
+                    yield AgentUpdate(AgentRole.ANALYZER, "progress",
+                                      f"    ❌ {city_name}: Analysis error",
+                                      progress_pct=progress)
+
+            # Sort by score
+            analyzed_destinations.sort(key=lambda x: x['overall_score'], reverse=True)
+
+            if analyzed_destinations:
+                top_city = analyzed_destinations[0]['city'].split(',')[0]
+                yield AgentUpdate(AgentRole.ANALYZER, "complete",
+                                  f"🏆 Analysis complete! Top: {top_city} ({analyzed_destinations[0]['overall_score']:.1f}/10), {meeting_criteria}/{len(flight_results)} meet criteria",
+                                  data={"analyzed_destinations": analyzed_destinations},
+                                  progress_pct=100.0)
+            else:
+                yield AgentUpdate(AgentRole.ANALYZER, "complete",
+                                  "❌ No valid destinations analyzed",
+                                  progress_pct=100.0)
+
+            print(f"DEBUG: Analysis phase complete")
+
+            # Step 4: Synthesis Phase - Simplified
+            yield AgentUpdate(AgentRole.SYNTHESIZER, "progress", "🎯 Generating recommendations...", progress_pct=50.0)
+
+            if analyzed_destinations:
+                top_destinations = analyzed_destinations[:3]
+
+                yield AgentUpdate(AgentRole.SYNTHESIZER, "data",
+                                  f"🏆 Top 3 destinations: {', '.join([d['city'].split(',')[0] for d in top_destinations])}",
+                                  progress_pct=80.0)
+
+                yield AgentUpdate(AgentRole.SYNTHESIZER, "complete",
+                                  f"🎉 Complete! {len(top_destinations)} recommendations ready",
+                                  data={
+                                      "recommendations": top_destinations,
+                                      "climate_summary": {
+                                          "total_alerts": len(climate_alerts),
+                                          "meeting_criteria": meeting_criteria
+                                      }
+                                  },
+                                  progress_pct=100.0)
+            else:
+                yield AgentUpdate(AgentRole.SYNTHESIZER, "complete",
+                                  "❌ No suitable destinations found for recommendations",
+                                  progress_pct=100.0)
+
+            print(f"DEBUG: Synthesis phase complete - workflow finished")
+
+        except Exception as e:
+            import traceback
+            error_details = traceback.format_exc()
+            print(f"DEBUG: Stream workflow error: {error_details}")
+            yield AgentUpdate(AgentRole.PLANNER, "error",
+                              f"❌ Workflow failed: {str(e)}\n\nDebug: {error_details[-200:]}",
+                              progress_pct=0.0)
 
     async def generate_weather_appropriate_itinerary(self, city_data: Dict[str, Any], days: int = 4) -> str:
         """Generate weather-appropriate 4-day itinerary for a destination"""
@@ -1287,7 +1292,7 @@ Format as:
 Focus on realistic, enjoyable activities that work well in these specific weather conditions."""
 
             response = self.client.chat.completions.create(
-                model="gpt-4",
+                model="gpt-4.1-nano",
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user",
@@ -1302,680 +1307,15 @@ Focus on realistic, enjoyable activities that work well in these specific weathe
         except Exception as e:
             return f"**ITINERARY GENERATION FAILED**\n\nError: {str(e)}\n\nFallback: Consider weather conditions ({city_data.get('temp_avg', 20):.1f}°C, {city_data.get('weather_desc', 'variable')}) when planning activities. Pack appropriately and have indoor backup plans."
 
-    async def call_agent(self, role: AgentRole, parsed_query: TravelQuery, context: str = "") -> AgentMessage:
-        """Enhanced autonomous agents with climate intelligence"""
-        tools_used = []
-        metadata = {}  # Initialize metadata for all agents
-        agent_data = ""  # Initialize agent_data
-
-        try:
-            if role == AgentRole.PLANNER:
-                # Use safe temperature range access
-                temp_min, temp_max = self.safe_get_temp_range(parsed_query)
-
-                # Initialize metadata
-                metadata = {}
-
-                system_prompt = """You are a strategic planning agent for travel research with climate intelligence. 
-Given a parsed travel query, create a specific action plan for gathering data.
-
-Consider:
-- What data sources are needed
-- What order to gather information
-- How to optimize the research process
-- Climate analysis requirements
-- Potential challenges and fallbacks
-
-Be specific about the steps and reasoning."""
-
-                query_summary = f"""
-Query: {getattr(parsed_query, 'raw_query', 'Unknown query')}
-Regions: {', '.join(getattr(parsed_query, 'regions', ['Europe']))}
-Date: {getattr(parsed_query, 'forecast_date', 'tomorrow')} ({getattr(parsed_query, 'forecast_date_parsed', datetime.now()).strftime('%Y-%m-%d')})
-Temperature: {temp_min}-{temp_max}°C
-Origin: {getattr(parsed_query, 'origin_city', 'Toronto')}
-Criteria: {', '.join(getattr(parsed_query, 'additional_criteria', []))}
-"""
-
-                response = self.client.chat.completions.create(
-                    model="gpt-4",
-                    messages=[
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": f"Create a research plan for: {query_summary}"}
-                    ],
-                    max_tokens=400,
-                    temperature=0.7
-                )
-
-                agent_data = response.choices[0].message.content
-                tools_used = ["strategic_analysis", "query_parsing", "climate_planning"]
-
-            elif role == AgentRole.RESEARCHER:
-                # Enhanced Researcher with climate analysis
-                agent_data = "**ENHANCED RESEARCH IN PROGRESS:**\n\n"
-                agent_data += f"📋 **Query Analysis:**\n"
-                agent_data += f"   - Regions: {', '.join(parsed_query.regions)}\n"
-                agent_data += f"   - Date: {parsed_query.forecast_date} ({parsed_query.forecast_date_parsed.strftime('%Y-%m-%d')})\n"
-
-                temp_min, temp_max = self.safe_get_temp_range(parsed_query)
-                agent_data += f"   - Temperature: {temp_min}-{temp_max}°C\n"
-                agent_data += f"   - Origin: {parsed_query.origin_city}\n\n"
-                metadata = {}
-
-                try:
-                    # Step 1: Get diverse cities for the specified regions (increased from 6 to 12)
-                    cities = await self.get_cities_for_regions(parsed_query.regions, 12)
-                    agent_data += f"✅ Generated {len(cities)} diverse cities across {len(parsed_query.regions)} regions\n"
-                    tools_used.append("ai_city_generation")
-
-                    # Step 2: Enhanced weather data with climate analysis
-                    weather_results = []
-                    climate_alerts = []
-                    successful_forecasts = 0
-
-                    agent_data += f"🌡️ **ENHANCED WEATHER ANALYSIS** for {parsed_query.forecast_date}...\n"
-                    agent_data += f"   📊 Including historical climate baselines and deviation analysis\n"
-
-                    # Check if date is too far in future
-                    days_ahead = (parsed_query.forecast_date_parsed - datetime.now()).days
-                    if days_ahead > 16:
-                        agent_data += f"⚠️ Date is {days_ahead} days ahead - using seasonal estimates with historical context\n"
-                    else:
-                        agent_data += f"✅ Date is {days_ahead} days ahead - using real forecasts with climate analysis\n"
-
-                    agent_data += f"\n"
-
-                    for i, city_data in enumerate(cities):
-                        try:
-                            agent_data += f"   🔍 **{city_data['city']}, {city_data['country']}**\n"
-                            coords = await self.get_city_coordinates(city_data['city'], city_data['country'])
-
-                            if coords:
-                                agent_data += f"   📍 Coordinates: {coords['lat']:.2f}, {coords['lon']:.2f}\n"
-
-                                # Use enhanced weather forecast with climate analysis
-                                weather_result = await self.get_weather_forecast_with_climate_analysis(
-                                    coords['lat'], coords['lon'],
-                                    f"{city_data['city']}, {city_data['country']}",
-                                    parsed_query.forecast_date_parsed
-                                )
-
-                                if weather_result.success:
-                                    weather_data = weather_result.data
-                                    weather_results.append(weather_data)
-                                    successful_forecasts += 1
-
-                                    # Display enhanced weather information
-                                    temp_avg = weather_data['temp_avg']
-                                    weather_desc = weather_data['weather_desc']
-                                    data_type = weather_data.get('data_type', 'forecast')
-                                    type_icon = "🔮" if data_type == 'seasonal_estimate' else "📊" if data_type == 'forecast' else "📈"
-
-                                    agent_data += f"   ✅ Current: {temp_avg:.1f}°C, {weather_desc} {type_icon}\n"
-
-                                    # Add climate context if available
-                                    if 'climate_deviation' in weather_data:
-                                        deviation = weather_data['climate_deviation']
-                                        baseline = weather_data.get('historical_baseline', {})
-
-                                        historical_avg = baseline.get('avg_temp_mean', temp_avg)
-                                        temp_deviation = deviation['temp_deviation_c']
-                                        severity = deviation['severity']
-
-                                        agent_data += f"   📊 Historical avg: {historical_avg:.1f}°C ({baseline.get('climate_zone', 'unknown')} climate)\n"
-
-                                        if severity in ['significant', 'extreme']:
-                                            if temp_deviation > 0:
-                                                agent_data += f"   🔥 **WARMER than normal**: {temp_deviation:+.1f}°C ({severity})\n"
-                                            else:
-                                                agent_data += f"   🧊 **COOLER than normal**: {temp_deviation:+.1f}°C ({severity})\n"
-
-                                            # Track climate alerts
-                                            climate_alerts.append({
-                                                'city': city_data['city'],
-                                                'deviation': temp_deviation,
-                                                'severity': severity,
-                                                'context': deviation.get('context', '')
-                                            })
-
-                                        elif severity == 'slight':
-                                            if temp_deviation > 0:
-                                                agent_data += f"   ⬆️ Slightly warmer: {temp_deviation:+.1f}°C\n"
-                                            else:
-                                                agent_data += f"   ⬇️ Slightly cooler: {temp_deviation:+.1f}°C\n"
-                                        else:
-                                            agent_data += f"   ✅ Typical seasonal weather\n"
-
-                                    agent_data += f"\n"
-                                else:
-                                    agent_data += f"   ❌ Weather forecast failed: {weather_result.error[:60]}\n"
-                            else:
-                                agent_data += f"   ❌ Could not get coordinates\n"
-
-                        except Exception as e:
-                            agent_data += f"   ❌ Error processing {city_data['city']}: {str(e)[:60]}\n"
-                            continue
-
-                    agent_data += f"✅ Enhanced weather analysis complete: {successful_forecasts}/{len(cities)} cities\n"
-
-                    # Climate alerts summary
-                    if climate_alerts:
-                        agent_data += f"\n🚨 **CLIMATE ALERTS** ({len(climate_alerts)} destinations with unusual weather):\n"
-                        for alert in climate_alerts:
-                            deviation_type = "hotter" if alert['deviation'] > 0 else "colder"
-                            agent_data += f"   ⚠️ **{alert['city']}**: {abs(alert['deviation']):.1f}°C {deviation_type} than normal ({alert['severity']})\n"
-                    else:
-                        agent_data += f"\n✅ All destinations showing typical seasonal weather patterns\n"
-
-                    tools_used.extend(["enhanced_weather_api", "historical_climate_analysis", "deviation_detection"])
-
-                    # Step 3: Enhanced Flight information with FR24 API
-                    flight_results = []
-                    agent_data += f"\n✈️ **ENHANCED FLIGHT ANALYSIS** from {parsed_query.origin_city}...\n"
-                    if self.flightradar24_key:
-                        agent_data += f"   📡 FlightRadar24 API: Connected ✅\n"
-                    else:
-                        agent_data += f"   📡 FlightRadar24 API: Not configured ⚠️ (using geographic estimates)\n"
-                    agent_data += f"\n"
-
-                    fr24_successful_calls = 0
-                    fr24_failed_calls = 0
-
-                    for weather_data in weather_results:
-                        try:
-                            city_name = weather_data['city'].split(',')[0].strip()
-                            country_name = weather_data['city'].split(',')[1].strip() if ',' in weather_data[
-                                'city'] else ""
-
-                            agent_data += f"   🛫 **{city_name} Flight Analysis:**\n"
-
-                            flight_info = await self.calculate_flight_info(parsed_query.origin_city, city_name,
-                                                                           country_name)
-
-                            if 'error' not in flight_info:
-                                # Ensure flight_info has required fields before merging
-                                if 'flight_time_hours' not in flight_info:
-                                    # Add fallback flight time if missing
-                                    distance_km = flight_info.get('distance_km', 5000)
-                                    flight_time = distance_km / 800 + 1.0
-                                    hours = int(flight_time)
-                                    minutes = int((flight_time - hours) * 60)
-                                    flight_info.update({
-                                        'flight_time_hours': flight_time,
-                                        'flight_time_display': f"{hours}h {minutes}m",
-                                        'routing': 'Estimated',
-                                        'data_source': 'fallback_estimate'
-                                    })
-
-                                combined_data = {**weather_data, **flight_info}
-                                flight_results.append(combined_data)
-
-                                # Display basic flight info
-                                if flight_info.get('flight_time_display'):
-                                    agent_data += f"   📍 Route: {flight_info['origin']} → {city_name}\n"
-                                    agent_data += f"   🕐 Duration: {flight_info['flight_time_display']}, Distance: {flight_info['distance_km']:.0f}km\n"
-                                    agent_data += f"   🛬 Airports: {flight_info.get('origin_airport', 'N/A')} → {flight_info.get('dest_airport', 'N/A')}\n"
-
-                                # Display FR24 API status
-                                api_status = flight_info.get('api_status', 'unknown')
-                                agent_data += f"   📡 FR24 Status: {api_status}\n"
-
-                                if flight_info.get('fr24_data_available'):
-                                    fr24_successful_calls += 1
-                                    agent_data += f"   ✅ **REAL FLIGHT DATA RETRIEVED**\n"
-                                else:
-                                    fr24_failed_calls += 1
-                                    if api_status == "no_fr24_key":
-                                        agent_data += f"   ⚠️ Using geographic estimates (no FR24 API key)\n"
-                                    else:
-                                        agent_data += f"   ❌ Using geographic estimates\n"
-
-                                agent_data += f"\n"
-                            else:
-                                agent_data += f"   ❌ Flight calculation failed: {flight_info['error'][:60]}\n"
-                                fr24_failed_calls += 1
-                        except Exception as e:
-                            agent_data += f"   ❌ Error processing flights for {city_name}: {str(e)[:50]}\n"
-                            fr24_failed_calls += 1
-                            continue
-
-                    # Enhanced research summary with climate insights
-                    agent_data += f"✅ Flight analysis complete for {len(flight_results)} destinations\n"
-                    if self.flightradar24_key:
-                        agent_data += f"📡 **FR24 API SUMMARY:**\n"
-                        agent_data += f"   - Successful API calls: {fr24_successful_calls}\n"
-                        agent_data += f"   - Failed/fallback calls: {fr24_failed_calls}\n"
-                    else:
-                        agent_data += f"📡 All flight data estimated (FR24 API not configured)\n"
-
-                    agent_data += f"\n**ENHANCED RESEARCH SUMMARY:**\n"
-                    agent_data += f"- Target date: {parsed_query.forecast_date_parsed.strftime('%A, %B %d, %Y')}\n"
-                    agent_data += f"- Temperature criteria: {temp_min}-{temp_max}°C\n"
-                    agent_data += f"- Origin: {parsed_query.origin_city}\n"
-                    agent_data += f"- Complete data: {len(flight_results)} destinations\n"
-
-                    if flight_results:
-                        avg_temp = sum(d['temp_avg'] for d in flight_results) / len(flight_results)
-                        avg_flight_time = sum(d.get('flight_time_hours', 8.0) for d in flight_results) / len(
-                            flight_results)
-
-                        # Calculate how many destinations meet temperature criteria
-                        meeting_temp_criteria = sum(1 for d in flight_results
-                                                    if temp_min <= d['temp_avg'] <= temp_max)
-
-                        agent_data += f"- Meeting temperature criteria: {meeting_temp_criteria}/{len(flight_results)}\n"
-                        agent_data += f"- Average temperature: {avg_temp:.1f}°C\n"
-                        agent_data += f"- Average flight time: {avg_flight_time:.1f} hours\n"
-
-                        # Climate context summary
-                        if climate_alerts:
-                            extreme_count = sum(1 for alert in climate_alerts if alert['severity'] == 'extreme')
-                            significant_count = sum(1 for alert in climate_alerts if alert['severity'] == 'significant')
-
-                            agent_data += f"- Climate anomalies: {len(climate_alerts)} destinations with unusual weather\n"
-                        else:
-                            agent_data += f"- Climate status: All destinations showing normal seasonal patterns\n"
-
-                    # Store enhanced metadata
-                    metadata = {
-                        "weather_results": weather_results,
-                        "flight_results": flight_results,
-                        "climate_alerts": climate_alerts,
-                        "parsed_query": asdict(parsed_query),
-                        "research_success": True,
-                        "climate_analysis_enabled": True,
-                        "total_cities_processed": len(cities),
-                        "successful_weather_calls": successful_forecasts,
-                        "fr24_successful_calls": fr24_successful_calls,
-                        "fr24_failed_calls": fr24_failed_calls
-                    }
-
-                except Exception as e:
-                    import traceback
-                    error_details = traceback.format_exc()
-                    agent_data += f"\n❌ Enhanced research failed: {str(e)}\n"
-                    agent_data += f"📋 Error details: {error_details[-500:]}\n"  # Last 500 chars of traceback
-                    metadata = {
-                        "weather_results": [],
-                        "flight_results": [],
-                        "climate_alerts": [],
-                        "parsed_query": asdict(parsed_query),
-                        "research_success": False,
-                        "error": str(e),
-                        "error_details": error_details
-                    }
-
-            elif role == AgentRole.ANALYZER:
-                # Enhanced Analyzer with climate deviation analysis and improved scoring
-                metadata = {}
-
-                # Get research data from previous agent
-                research_messages = [msg for msg in self.conversation_history if msg.agent_role == AgentRole.RESEARCHER]
-
-                if research_messages and research_messages[-1].metadata.get('research_success'):
-                    research_data = research_messages[-1].metadata
-                    flight_results = research_data.get('flight_results', [])
-                    climate_alerts = research_data.get('climate_alerts', [])
-
-                    if flight_results:
-                        temp_min, temp_max = self.safe_get_temp_range(parsed_query)
-
-                        agent_data = "**ENHANCED ANALYSIS IN PROGRESS:**\n\n"
-
-                        # Analyze each destination with improved scoring
-                        analyzed_destinations = []
-                        meeting_criteria = 0
-                        climate_advantages = []
-                        climate_concerns = []
-
-                        for dest in flight_results:
-                            try:
-                                # Check if temperature meets criteria
-                                meets_temp = temp_min <= dest['temp_avg'] <= temp_max
-                                if meets_temp:
-                                    meeting_criteria += 1
-
-                                # IMPROVED SCORING SYSTEM - addressing Dublin issue
-                                temp_target = (temp_min + temp_max) / 2
-                                temp_distance = abs(dest['temp_avg'] - temp_target)
-
-                                # More nuanced temperature scoring
-                                if meets_temp:
-                                    # Perfect match gets 10, gradually decrease as we move away from center
-                                    temp_range_size = temp_max - temp_min
-                                    temp_score = 10 - (temp_distance / (temp_range_size / 2)) * 2
-                                    temp_score = max(8, temp_score)  # Minimum of 8 if within range
-                                else:
-                                    # Outside range - score based on how close
-                                    temp_score = max(0, 8 - temp_distance * 1.5)
-
-                                # Enhanced flight scoring
-                                flight_time_hours = dest.get('flight_time_hours', 8.0)
-                                base_flight_score = max(0, 10 - (flight_time_hours / 12))  # More generous
-
-                                # FR24 enhancement bonus
-                                fr24_bonus = 1 if dest.get('fr24_data_available') else 0
-                                flight_score = min(10, base_flight_score + fr24_bonus)
-
-                                # More realistic humidity scoring
-                                humidity_score = 10 if 30 <= dest['humidity'] <= 80 else max(6, 10 - abs(
-                                    dest['humidity'] - 55) / 10)
-
-                                # Climate stability score (less punitive)
-                                climate_score = 10
-                                climate_bonus = 0
-                                climate_penalty = 0
-
-                                if 'climate_deviation' in dest:
-                                    deviation = dest['climate_deviation']
-                                    severity = deviation['severity']
-                                    temp_dev = deviation['temp_deviation_c']
-
-                                    if severity == 'extreme':
-                                        climate_penalty = 2  # Reduced from 3
-                                        climate_score = 6  # Improved from 4
-                                    elif severity == 'significant':
-                                        climate_penalty = 1  # Reduced from 1.5
-                                        climate_score = 7  # Improved from 6
-                                    elif severity == 'slight':
-                                        climate_score = 8.5  # Improved from 8
-                                    else:  # normal
-                                        climate_bonus = 0.3  # Slight reward for predictable weather
-
-                                    # Special handling for favorable unusual weather
-                                    if meets_temp and temp_dev > 0 and severity in ['slight', 'significant']:
-                                        climate_bonus += 0.5
-                                        climate_advantages.append({
-                                            'city': dest['city'].split(',')[0],
-                                            'advantage': f"Unusually warm (+{temp_dev:.1f}°C) but perfect for your criteria"
-                                        })
-
-                                # REBALANCED overall score - less weight on flight time, more on temperature match
-                                flight_reliability_score = 7  # Default
-                                if dest.get('recommended_flights'):
-                                    best_flight = dest['recommended_flights'][0] if dest['recommended_flights'] else {}
-                                    if 'overall_score' in best_flight:
-                                        flight_reliability_score = best_flight['overall_score']
-
-                                overall_score = (
-                                        (temp_score * 0.40) +  # Increased from 0.30
-                                        (flight_score * 0.20) +  # Decreased from 0.25
-                                        (humidity_score * 0.10) +  # Decreased from 0.15
-                                        (climate_score * 0.20) +  # Same
-                                        (flight_reliability_score * 0.10) +  # Same
-                                        climate_bonus - climate_penalty
-                                )
-
-                                analyzed_destinations.append({
-                                    **dest,
-                                    'meets_criteria': meets_temp,
-                                    'temp_score': temp_score,
-                                    'flight_score': flight_score,
-                                    'humidity_score': humidity_score,
-                                    'climate_score': climate_score,
-                                    'flight_reliability_score': flight_reliability_score,
-                                    'fr24_bonus': fr24_bonus,
-                                    'climate_bonus': climate_bonus,
-                                    'climate_penalty': climate_penalty,
-                                    'overall_score': min(10, max(0, overall_score))
-                                })
-
-                            except Exception as e:
-                                continue
-
-                        # Sort by overall score
-                        analyzed_destinations.sort(key=lambda x: x['overall_score'], reverse=True)
-
-                        agent_data += f"📊 **ENHANCED ANALYSIS RESULTS:**\n"
-                        agent_data += f"- Temperature criteria: {temp_min}-{temp_max}°C\n"
-                        agent_data += f"- Destinations meeting criteria: {meeting_criteria}/{len(analyzed_destinations)}\n"
-                        agent_data += f"- Climate alerts: {len(climate_alerts)} destinations with unusual weather\n"
-                        agent_data += f"- Analysis date: {parsed_query.forecast_date} ({parsed_query.forecast_date_parsed.strftime('%Y-%m-%d')})\n\n"
-
-                        if analyzed_destinations:
-                            agent_data += "🏆 **TOP DESTINATIONS (Enhanced Climate-Aware Scoring):**\n"
-                            for i, dest in enumerate(analyzed_destinations[:8], 1):  # Show top 8 instead of 5
-                                city_name = dest['city'].split(',')[0]
-                                status = "✅" if dest['meets_criteria'] else "⚠️"
-
-                                # Enhanced status indicators
-                                indicators = []
-                                if dest.get('climate_bonus', 0) > 0:
-                                    indicators.append("🌟")  # Climate bonus
-                                if dest.get('climate_penalty', 0) > 0:
-                                    indicators.append("⚡")  # Climate concern
-                                if dest.get('fr24_data_available'):
-                                    indicators.append("✈️")  # Real flight data
-
-                                indicator_str = "".join(indicators)
-
-                                agent_data += f"{i}. {status} **{city_name}**{indicator_str} (Score: {dest['overall_score']:.1f}/10)\n"
-                                agent_data += f"   🌡️ {dest['temp_avg']:.1f}°C | ✈️ {dest.get('flight_time_display', 'N/A')} | 💧 {dest['humidity']:.0f}%\n"
-                                agent_data += f"   📍 {dest['weather_desc']} | 🛫 {dest.get('routing', 'N/A')}\n"
-
-                                # Detailed scoring breakdown for top 3
-                                if i <= 3:
-                                    agent_data += f"   📊 Scores: Temp={dest['temp_score']:.1f} Flight={dest['flight_score']:.1f} Climate={dest['climate_score']:.1f}\n"
-
-                                agent_data += f"\n"
-
-                            metadata = {
-                                "analyzed_destinations": analyzed_destinations,
-                                "climate_summary": {
-                                    'total_alerts': len(climate_alerts),
-                                    'climate_advantages': len(climate_advantages),
-                                    'climate_concerns': len(climate_concerns),
-                                    'meeting_criteria': meeting_criteria
-                                },
-                                "climate_advantages": climate_advantages,
-                                "climate_concerns": climate_concerns
-                            }
-                            tools_used = ["enhanced_data_analysis", "climate_intelligence", "improved_scoring",
-                                          "ai_climate_insights"]
-                        else:
-                            agent_data += "❌ No valid destinations to analyze"
-                            metadata = {}
-                            tools_used = ["data_analysis"]
-                    else:
-                        agent_data = "❌ No flight/weather data available from research phase"
-                        metadata = {}
-                        tools_used = []
-                else:
-                    agent_data = "❌ Research phase failed or no data available"
-                    metadata = {}
-                    tools_used = []
-
-            elif role == AgentRole.SYNTHESIZER:
-                # Enhanced Synthesizer with itinerary generation
-                metadata = {}
-
-                # Get analysis data
-                analysis_messages = [msg for msg in self.conversation_history if msg.agent_role == AgentRole.ANALYZER]
-
-                if analysis_messages and analysis_messages[-1].metadata.get('analyzed_destinations'):
-                    destinations = analysis_messages[-1].metadata['analyzed_destinations']
-                    climate_summary = analysis_messages[-1].metadata.get('climate_summary', {})
-
-                    agent_data = "**CLIMATE-ENHANCED RECOMMENDATIONS & ITINERARIES:**\n\n"
-
-                    if destinations:
-                        top_destinations = destinations[:3]
-
-                        # Enhanced recommendations with itineraries for top 2
-                        agent_data += "🏆 **TOP RECOMMENDATIONS:**\n\n"
-
-                        for i, dest in enumerate(top_destinations, 1):
-                            city_name = dest['city'].split(',')[0]
-                            country_name = dest['city'].split(',')[1].strip() if ',' in dest['city'] else ""
-                            status = "🎯" if dest['meets_criteria'] else "⭐"
-
-                            # Enhanced indicators
-                            indicators = []
-                            if dest.get('climate_bonus', 0) > 0:
-                                indicators.append("🌟")
-                            if dest.get('fr24_data_available'):
-                                indicators.append("✈️")
-
-                            indicator_str = " ".join(indicators)
-
-                            agent_data += f"**{i}. {status} {city_name}, {country_name}** {indicator_str}\n"
-                            agent_data += f"   🌡️ Weather: {dest['temp_avg']:.1f}°C, {dest['weather_desc']}\n"
-                            agent_data += f"   ✈️ Flight: {dest.get('flight_time_display', 'N/A')} ({dest.get('routing', 'N/A')})\n"
-                            agent_data += f"   📊 Overall Score: {dest['overall_score']:.1f}/10\n"
-
-                            # Climate context
-                            if 'climate_deviation' in dest:
-                                deviation = dest['climate_deviation']
-                                if deviation['severity'] != 'normal':
-                                    agent_data += f"   🌡️ Climate Note: {deviation['context'][:80]}...\n"
-
-                            # Generate 4-day itinerary for top 2 destinations
-                            if i <= 2:
-                                agent_data += f"\n   🗓️ **4-DAY WEATHER-APPROPRIATE ITINERARY:**\n"
-                                try:
-                                    itinerary = await self.generate_weather_appropriate_itinerary(dest, 4)
-                                    # Indent the itinerary
-                                    indented_itinerary = '\n'.join(f"   {line}" for line in itinerary.split('\n'))
-                                    agent_data += f"{indented_itinerary}\n"
-                                except Exception as e:
-                                    agent_data += f"   ❌ Itinerary generation failed: {str(e)[:100]}\n"
-
-                            agent_data += f"\n"
-
-                        # Enhanced booking strategy
-                        agent_data += f"🎯 **CLIMATE-SMART BOOKING STRATEGY:**\n\n"
-                        agent_data += f"**Target Details:**\n"
-                        temp_min, temp_max = self.safe_get_temp_range(parsed_query)
-                        agent_data += f"- Date: {parsed_query.forecast_date_parsed.strftime('%A, %B %d, %Y')}\n"
-                        agent_data += f"- Temperature Range: {temp_min}-{temp_max}°C\n"
-                        agent_data += f"- Departure: {parsed_query.origin_city}\n"
-
-                        meeting_criteria = climate_summary.get('meeting_criteria', 0)
-                        total_analyzed = len(destinations)
-
-                        agent_data += f"\n**Analysis Summary:**\n"
-                        agent_data += f"- Destinations analyzed: {total_analyzed}\n"
-                        agent_data += f"- Meeting temperature criteria: {meeting_criteria}/{total_analyzed}\n"
-
-                        if climate_summary.get('total_alerts', 0) > 0:
-                            agent_data += f"- Climate alerts: {climate_summary['total_alerts']} destinations with unusual weather\n"
-                            agent_data += f"- **Booking Tip**: Consider flexible tickets, monitor weather 1 week before travel\n"
-                        else:
-                            agent_data += f"- Climate status: Stable seasonal weather expected\n"
-                            agent_data += f"- **Booking Confidence**: High - typical seasonal patterns predicted\n"
-
-                        if parsed_query.additional_criteria:
-                            agent_data += f"- Special requirements: {', '.join(parsed_query.additional_criteria)}\n"
-
-                        # Why these destinations ranked well
-                        agent_data += f"\n**Why These Destinations Ranked Well:**\n"
-                        for i, dest in enumerate(top_destinations[:2], 1):
-                            city_name = dest['city'].split(',')[0]
-                            reasons = []
-
-                            if dest['meets_criteria']:
-                                temp_min, temp_max = self.safe_get_temp_range(parsed_query)
-                                reasons.append(
-                                    f"Perfect temperature match ({dest['temp_avg']:.1f}°C within {temp_min}-{temp_max}°C)")
-
-                            if dest.get('fr24_data_available'):
-                                reasons.append("Real flight data available")
-
-                            if dest.get('climate_bonus', 0) > 0:
-                                reasons.append("Favorable climate conditions")
-
-                            if dest.get('flight_time_hours', 0) < 10:
-                                reasons.append("Reasonable flight time")
-
-                            agent_data += f"{i}. **{city_name}**: {'; '.join(reasons)}\n"
-
-                        tools_used = ["climate_enhanced_synthesis", "weather_appropriate_itineraries",
-                                      "enhanced_recommendations"]
-                        metadata = {
-                            "final_recommendations": top_destinations[:3],
-                            "climate_summary": climate_summary,
-                            "booking_date": parsed_query.forecast_date_parsed.strftime('%Y-%m-%d'),
-                            "total_options": len(destinations),
-                            "climate_enhanced": True,
-                            "itineraries_generated": 2
-                        }
-                    else:
-                        agent_data = "❌ No suitable destinations found. Enhanced suggestions:\n"
-                        agent_data += "- Consider adjusting temperature range (current weather patterns may be unusual)\n"
-                        agent_data += "- Try alternative dates (climate deviations may be temporary)\n"
-                        agent_data += "- Expand regions (some areas may have better climate stability)\n"
-                        tools_used = ["climate_aware_fallback"]
-                        metadata = {}
-                else:
-                    agent_data = "❌ No analysis data available for enhanced recommendations"
-                    tools_used = ["error_handling"]
-                    metadata = {}
-
-            message = AgentMessage(
-                agent_role=role,
-                content=agent_data,
-                timestamp=datetime.now(),
-                tools_used=tools_used,
-                metadata=metadata
-            )
-
-            self.conversation_history.append(message)
-            return message
-
-        except Exception as e:
-            import traceback
-            error_details = traceback.format_exc()
-            print(f"Agent {role.value} error: {error_details}")
-
-            error_message = AgentMessage(
-                agent_role=role,
-                content=f"❌ Agent {role.value} encountered error: {str(e)}\n\nDebug info:\n{error_details[-300:]}",
-                timestamp=datetime.now(),
-                tools_used=[],
-                metadata={"error": True, "error_details": error_details}
-            )
-            self.conversation_history.append(error_message)
-            return error_message
-
-    async def run_agentic_workflow(self, user_query: str) -> List[AgentMessage]:
-        """Run the complete enhanced agentic workflow with climate intelligence"""
-
-        # Clear previous conversation
-        self.conversation_history = []
-
-        # Step 1: Parse the query intelligently
-        parsed_query = await self.parse_travel_query(user_query)
-
-        # Step 2: Run enhanced agent workflow
-        workflow_messages = []
-
-        # Planning
-        plan_msg = await self.call_agent(AgentRole.PLANNER, parsed_query)
-        workflow_messages.append(plan_msg)
-
-        # Research (with climate analysis)
-        research_msg = await self.call_agent(AgentRole.RESEARCHER, parsed_query, plan_msg.content)
-        workflow_messages.append(research_msg)
-
-        # Analysis (with climate intelligence)
-        analysis_msg = await self.call_agent(AgentRole.ANALYZER, parsed_query, research_msg.content)
-        workflow_messages.append(analysis_msg)
-
-        # Synthesis (with climate-aware recommendations and itineraries)
-        synthesis_msg = await self.call_agent(AgentRole.SYNTHESIZER, parsed_query, analysis_msg.content)
-        workflow_messages.append(synthesis_msg)
-
-        return workflow_messages
-
 
 # Initialize system
-ai_system = AgenticAISystem(OPENAI_KEY, OPENWEATHER_KEY, FLIGHTRADAR24_KEY) if OPENAI_KEY else None
+ai_system = StreamingAgenticAISystem(OPENAI_KEY, OPENWEATHER_KEY, FLIGHTRADAR24_KEY) if OPENAI_KEY else None
 
-# Enhanced Shiny UI
+# Enhanced Streaming UI
 app_ui = ui.page_fillable(
-    ui.h1("🤖 Enhanced Agentic AI Travel System", class_="text-center mb-4"),
+    ui.h1("🚀 Streaming Agentic AI Travel System", class_="text-center mb-4"),
     ui.p(
-        "🌡️ Climate Intelligence • ✈️ Flight Analysis • 🎯 Smart Recommendations • 🗓️ Weather-Appropriate Itineraries",
+        "🌡️ Climate Intelligence • ✈️ Flight Analysis • 🔄 Real-Time Streaming • 🗓️ Weather-Appropriate Itineraries",
         class_="text-center text-muted mb-4"),
 
     ui.layout_sidebar(
@@ -1987,22 +1327,19 @@ app_ui = ui.page_fillable(
 
             ui.h4("Enhanced Examples"),
             ui.input_action_button("example1", "🌍 Europe: Climate Analysis", class_="btn-outline-info btn-sm mb-1"),
-            ui.input_action_button("example2", "🏝️ Asia: Warm + Morning Flights",
-                                   class_="btn-outline-info btn-sm mb-1"),
+            ui.input_action_button("example2", "🏝️ Asia: Warm + Streaming", class_="btn-outline-info btn-sm mb-1"),
             ui.input_action_button("example3", "🌮 Mexico: Beach Weather", class_="btn-outline-info btn-sm mb-1"),
             ui.input_action_button("example4", "❄️ Dublin Test: Cooler Weather", class_="btn-outline-info btn-sm mb-1"),
             ui.input_action_button("example5", "🌡️ Climate Anomaly Test", class_="btn-outline-info btn-sm mb-1"),
-            ui.input_action_button("example6", "✈️ FR24 Flight Data Test", class_="btn-outline-info btn-sm mb-1"),
-            ui.input_action_button("example7", "🗺️ Diverse Cities Test", class_="btn-outline-info btn-sm mb-1"),
+            ui.input_action_button("example6", "🗺️ Diverse Cities Streaming", class_="btn-outline-info btn-sm mb-1"),
 
             ui.hr(),
-            ui.h5("Enhanced Features"),
-            ui.p("✅ Historical Climate Baselines", style="font-size: 0.85em; margin: 2px 0;"),
-            ui.p("✅ Weather Deviation Analysis", style="font-size: 0.85em; margin: 2px 0;"),
-            ui.p("✅ Improved Scoring Algorithm", style="font-size: 0.85em; margin: 2px 0;"),
-            ui.p("✅ Diverse City Generation", style="font-size: 0.85em; margin: 2px 0;"),
-            ui.p("✅ 4-Day Weather Itineraries", style="font-size: 0.85em; margin: 2px 0;"),
-            ui.p("✅ FlightRadar24 Real Data", style="font-size: 0.85em; margin: 2px 0;"),
+            ui.h5("🚀 Streaming Features"),
+            ui.p("✅ Real-Time Agent Updates", style="font-size: 0.85em; margin: 2px 0;"),
+            ui.p("✅ Progressive Results Display", style="font-size: 0.85em; margin: 2px 0;"),
+            ui.p("✅ Live Progress Tracking", style="font-size: 0.85em; margin: 2px 0;"),
+            ui.p("✅ Visual Workflow Status", style="font-size: 0.85em; margin: 2px 0;"),
+            ui.p("✅ Instant Feedback Loop", style="font-size: 0.85em; margin: 2px 0;"),
             ui.p("✅ Enhanced Error Handling", style="font-size: 0.85em; margin: 2px 0;"),
 
             width=300
@@ -2012,97 +1349,130 @@ app_ui = ui.page_fillable(
             ui.div(
                 ui.input_text_area(
                     "user_query",
-                    "Enter your enhanced travel query:",
-                    placeholder="e.g., 'Find cooler European destinations with 5-15°C in 10 days from Toronto' or 'Diverse Asian cities with warm weather next Friday, include itineraries'",
+                    "Enter your travel query for streaming analysis:",
+                    placeholder="e.g., 'Find cooler European destinations with 5-15°C in 10 days from Toronto' - watch the real-time agent workflow!",
                     rows=3,
                     width="100%"
                 ),
-                ui.input_action_button("run_workflow", "🚀 Run Enhanced AI Agents", class_="btn-success mb-4"),
+                ui.input_action_button("run_workflow", "🚀 Start Streaming AI Agents", class_="btn-success mb-4"),
                 class_="mb-4"
             ),
 
+            # Agent Workflow Visual
             ui.div(
-                ui.output_ui("status_display"),
-                class_="mb-3"
+                ui.h4("🔄 Agent Workflow Status"),
+                ui.output_ui("workflow_visual"),
+                class_="mb-4"
             ),
 
+            # Live Updates Display
             ui.div(
-                ui.h3("Enhanced AI Agent Workflow"),
-                ui.output_ui("conversation_display"),
+                ui.h4("📡 Live Agent Updates"),
+                ui.output_ui("live_updates_display"),
+                class_="mb-4"
+            ),
+
+            # Final Results Display
+            ui.div(
+                ui.h3("🎯 Final Recommendations & Itineraries"),
+                ui.output_ui("final_results_display"),
                 class_="conversation-container"
             )
         )
     ),
 
-    # Enhanced CSS
+    # Enhanced CSS for streaming interface
     ui.tags.style("""
         .conversation-container {
-            max-height: 700px;
+            max-height: 600px;
             overflow-y: auto;
             border: 1px solid #ddd;
             border-radius: 12px;
             padding: 20px;
             background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
         }
-        .agent-message {
-            margin-bottom: 25px;
-            padding: 20px;
-            border-radius: 12px;
-            border-left: 5px solid;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-            transition: transform 0.2s ease;
+
+        .live-updates-container {
+            max-height: 400px;
+            overflow-y: auto;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            padding: 15px;
+            background: linear-gradient(135deg, #fff 0%, #f8f9fa 100%);
+            font-family: 'Courier New', monospace;
         }
-        .agent-message:hover {
-            transform: translateY(-2px);
-        }
-        .agent-planner { 
-            border-left-color: #007bff; 
+
+        .workflow-visual {
+            padding: 15px;
             background: linear-gradient(135deg, #e3f2fd 0%, #bbdefb 100%);
+            border-radius: 12px;
+            border: 1px solid #2196f3;
         }
-        .agent-researcher { 
-            border-left-color: #28a745; 
-            background: linear-gradient(135deg, #e8f5e9 0%, #c8e6c9 100%);
-        }
-        .agent-analyzer { 
-            border-left-color: #ffc107; 
-            background: linear-gradient(135deg, #fff8e1 0%, #ffecb3 100%);
-        }
-        .agent-synthesizer { 
-            border-left-color: #dc3545; 
-            background: linear-gradient(135deg, #ffebee 0%, #ffcdd2 100%);
-        }
-        .agent-header {
-            font-weight: bold;
-            margin-bottom: 12px;
+
+        .agent-card {
+            background: white;
+            border-radius: 8px;
+            padding: 12px;
+            margin: 5px;
+            text-align: center;
+            min-height: 80px;
             display: flex;
-            justify-content: space-between;
-            align-items: center;
-            font-size: 1.1em;
+            flex-direction: column;
+            justify-content: center;
+            transition: all 0.3s ease;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
         }
-        .tools-used {
-            font-size: 0.85em;
-            color: #666;
-            font-style: italic;
-            background: rgba(255,255,255,0.7);
-            padding: 4px 8px;
-            border-radius: 6px;
+
+        .agent-pending {
+            background: #f8f9fa;
+            color: #6c757d;
+            border: 2px solid #dee2e6;
         }
-        .timestamp {
-            font-size: 0.8em;
-            color: #888;
+
+        .agent-active {
+            background: linear-gradient(135deg, #007bff, #0056b3);
+            color: white;
+            border: 2px solid #0056b3;
+            animation: pulse 2s infinite;
         }
+
+        .agent-complete {
+            background: linear-gradient(135deg, #28a745, #1e7e34);
+            color: white;
+            border: 2px solid #1e7e34;
+        }
+
+        .agent-error {
+            background: linear-gradient(135deg, #dc3545, #c82333);
+            color: white;
+            border: 2px solid #c82333;
+        }
+
+        @keyframes pulse {
+            0% { transform: scale(1); }
+            50% { transform: scale(1.05); }
+            100% { transform: scale(1); }
+        }
+
+        .update-progress { color: #007bff; }
+        .update-data { color: #28a745; font-weight: bold; }
+        .update-complete { color: #17a2b8; font-weight: bold; }
+        .update-error { color: #dc3545; font-weight: bold; }
+
+        .progress-bar {
+            transition: width 0.5s ease;
+        }
+
         .btn-outline-info {
             margin-bottom: 5px;
             width: 100%;
             text-align: left;
             font-size: 0.85em;
         }
-        .itinerary-section {
-            background: rgba(255,255,255,0.8);
-            padding: 15px;
-            border-radius: 8px;
-            margin: 10px 0;
-            border-left: 4px solid #17a2b8;
+
+        .timestamp {
+            font-size: 0.75em;
+            color: #6c757d;
         }
     """)
 )
@@ -2110,10 +1480,20 @@ app_ui = ui.page_fillable(
 
 def server(input, output, session):
     workflow_status = reactive.Value(
-        f"✅ Enhanced System Ready: OpenAI ✅, Weather API {'✅' if OPENWEATHER_KEY else '❌'}, FR24 API {'✅' if FLIGHTRADAR24_KEY else '❌'}, Climate Intelligence ✅" if ai_system
-        else "⚠️ Please connect OpenAI API key for enhanced features"
+        f"✅ Streaming System Ready: OpenAI ✅, Weather API {'✅' if OPENWEATHER_KEY else '❌'}, Climate Intelligence ✅" if ai_system
+        else "⚠️ Please connect OpenAI API key for streaming features"
     )
-    conversation_messages = reactive.Value([])
+
+    # Streaming reactive values
+    live_updates = reactive.Value([])
+    agent_states = reactive.Value({
+        'planner': 'pending',
+        'researcher': 'pending',
+        'analyzer': 'pending',
+        'synthesizer': 'pending'
+    })
+    final_results = reactive.Value({})
+    workflow_active = reactive.Value(False)
 
     @reactive.Effect
     @reactive.event(input.connect)
@@ -2123,59 +1503,54 @@ def server(input, output, session):
 
         if openai_key:
             try:
-                ai_system = AgenticAISystem(openai_key, OPENWEATHER_KEY, FLIGHTRADAR24_KEY)
+                ai_system = StreamingAgenticAISystem(openai_key, OPENWEATHER_KEY, FLIGHTRADAR24_KEY)
                 workflow_status.set(
-                    f"✅ Enhanced System Connected | Weather API {'✅' if OPENWEATHER_KEY else '❌'} | FR24 API {'✅' if FLIGHTRADAR24_KEY else '❌'} | Climate Intelligence ✅")
+                    f"✅ Streaming System Connected | Weather API {'✅' if OPENWEATHER_KEY else '❌'} | Climate Intelligence ✅")
             except Exception as e:
                 workflow_status.set(f"❌ Connection failed: {str(e)}")
         else:
             workflow_status.set("⚠️ Please enter OpenAI API key")
 
+    # Example loading functions
     @reactive.Effect
     @reactive.event(input.example1)
     def load_example1():
         ui.update_text_area("user_query",
-                            value="Find European destinations with temperatures between 18-25°C in 1 week, include climate analysis and deviation alerts")
+                            value="Find European destinations with temperatures between 18-25°C in 1 week, include climate analysis and streaming updates")
 
     @reactive.Effect
     @reactive.event(input.example2)
     def load_example2():
         ui.update_text_area("user_query",
-                            value="Asian cities with warm weather next Friday, morning flights from Toronto, check for unusual climate conditions")
+                            value="Asian cities with warm weather next Friday, watch real-time agent workflow and climate analysis")
 
     @reactive.Effect
     @reactive.event(input.example3)
     def load_example3():
         ui.update_text_area("user_query",
-                            value="Mexican coastal destinations with 25-30°C weather in 5 days, analyze climate patterns vs historical norms")
+                            value="Mexican coastal destinations with 25-30°C weather in 5 days, stream climate patterns analysis")
 
     @reactive.Effect
     @reactive.event(input.example4)
     def load_example4():
         ui.update_text_area("user_query",
-                            value="Find cooler European destinations with 5-15°C in 10 days, Toronto departure, flag any weather anomalies")
+                            value="Find cooler European destinations with 5-15°C in 10 days, show live weather anomaly detection")
 
     @reactive.Effect
     @reactive.event(input.example5)
     def load_example5():
         ui.update_text_area("user_query",
-                            value="South American cities next month, check for climate deviations from seasonal norms, warm weather preferred")
+                            value="South American cities next month, stream climate deviation analysis in real-time")
 
     @reactive.Effect
     @reactive.event(input.example6)
     def load_example6():
         ui.update_text_area("user_query",
-                            value="European destinations tomorrow with FlightRadar24 flight analysis, show real flight data and recommendations")
-
-    @reactive.Effect
-    @reactive.event(input.example7)
-    def load_example7():
-        ui.update_text_area("user_query",
-                            value="Diverse European cities in 2 weeks, mix of famous and hidden gems, include 4-day weather-appropriate itineraries")
+                            value="Diverse European cities in 2 weeks, stream diverse city generation and detailed itineraries")
 
     @reactive.Effect
     @reactive.event(input.run_workflow)
-    async def run_agentic_workflow():
+    def run_streaming_workflow():
         global ai_system
 
         if not ai_system:
@@ -2186,18 +1561,311 @@ def server(input, output, session):
             workflow_status.set("⚠️ Please enter a query")
             return
 
-        workflow_status.set("🔄 Enhanced AI agents working with climate intelligence & itineraries...")
-        conversation_messages.set([])
+        # Reset state
+        workflow_active.set(True)
+        live_updates.set([])
+        final_results.set({})
+        agent_states.set({
+            'planner': 'pending',
+            'researcher': 'pending',
+            'analyzer': 'pending',
+            'synthesizer': 'pending'
+        })
 
+        workflow_status.set("🔄 Streaming AI agents starting...")
+
+        # Run the streaming workflow in the background
+        asyncio.create_task(streaming_workflow_task(input.user_query()))
+
+    async def streaming_workflow_task(query: str):
+        """Background task for streaming workflow"""
         try:
-            messages = await ai_system.run_agentic_workflow(input.user_query())
-            conversation_messages.set(messages)
-            workflow_status.set("✅ Enhanced AI workflow completed with climate analysis & itineraries")
+            print(f"DEBUG: Starting streaming workflow for query: {query}")
+            current_agent = None
+            updates_list = []
+
+            # Add initial update
+            updates_list.append({
+                'agent': 'system',
+                'type': 'progress',
+                'content': '🚀 Initializing streaming workflow...',
+                'timestamp': datetime.now().strftime("%H:%M:%S"),
+                'progress': 0
+            })
+            live_updates.set(updates_list.copy())
+
+            update_count = 0
+            async for update in ai_system.stream_agent_workflow(query):
+                update_count += 1
+                print(f"DEBUG: Received update #{update_count}: {update.agent_role.value} - {update.content[:50]}...")
+
+                # Update agent states
+                current_states = agent_states.get()
+
+                # Reset previous agent to complete if we're on a new agent
+                if current_agent and current_agent != update.agent_role.value:
+                    current_states[current_agent] = 'complete'
+                    print(f"DEBUG: Setting {current_agent} to complete")
+
+                # Set current agent state
+                if update.update_type == "error":
+                    current_states[update.agent_role.value] = 'error'
+                elif update.update_type == "complete":
+                    current_states[update.agent_role.value] = 'complete'
+                else:
+                    current_states[update.agent_role.value] = 'active'
+
+                current_agent = update.agent_role.value
+                agent_states.set(current_states.copy())
+                print(f"DEBUG: Agent states updated: {current_states}")
+
+                # Add to live updates
+                updates_list.append({
+                    'agent': update.agent_role.value,
+                    'type': update.update_type,
+                    'content': update.content,
+                    'timestamp': update.timestamp.strftime("%H:%M:%S"),
+                    'progress': update.progress_pct
+                })
+
+                # Keep only last 50 updates for performance
+                if len(updates_list) > 50:
+                    updates_list = updates_list[-50:]
+
+                live_updates.set(updates_list.copy())
+                print(f"DEBUG: Live updates count: {len(updates_list)}")
+
+                # Store final results
+                if update.update_type == "complete" and update.data:
+                    current_results = final_results.get()
+                    current_results[update.agent_role.value] = update.data
+                    final_results.set(current_results.copy())
+                    print(f"DEBUG: Stored results for {update.agent_role.value}")
+
+                # Small delay for UI responsiveness
+                await asyncio.sleep(0.1)
+
+            print(f"DEBUG: Streaming completed with {update_count} total updates")
+            workflow_status.set("✅ Streaming workflow completed successfully!")
+
         except Exception as e:
             import traceback
             error_details = traceback.format_exc()
-            workflow_status.set(f"❌ Enhanced workflow failed: {str(e)}")
-            print(f"Workflow error details: {error_details}")
+            print(f"ERROR: Streaming workflow failed: {error_details}")
+            workflow_status.set(f"❌ Streaming workflow failed: {str(e)}")
+
+            # Add error to updates
+            try:
+                updates_list = live_updates.get()
+                updates_list.append({
+                    'agent': 'system',
+                    'type': 'error',
+                    'content': f"❌ Workflow failed: {str(e)}",
+                    'timestamp': datetime.now().strftime("%H:%M:%S"),
+                    'progress': 0
+                })
+                live_updates.set(updates_list)
+            except Exception as update_error:
+                print(f"ERROR: Could not update live_updates: {update_error}")
+
+        finally:
+            workflow_active.set(False)
+            print("DEBUG: Workflow marked as inactive")
+
+    @output
+    @render.ui
+    def workflow_visual():
+        """Visual representation of agent workflow progress"""
+        states = agent_states.get()
+
+        agents = [
+            {'name': 'Planner', 'icon': '🎯', 'key': 'planner'},
+            {'name': 'Researcher', 'icon': '🔍', 'key': 'researcher'},
+            {'name': 'Analyzer', 'icon': '📊', 'key': 'analyzer'},
+            {'name': 'Synthesizer', 'icon': '🎯', 'key': 'synthesizer'}
+        ]
+
+        elements = []
+        for i, agent in enumerate(agents):
+            state = states.get(agent['key'], 'pending')
+
+            status_icons = {
+                'pending': '⏳',
+                'active': '🔄',
+                'complete': '✅',
+                'error': '❌'
+            }
+
+            elements.append(
+                ui.div(
+                    ui.div(
+                        ui.h6(f"{agent['icon']} {agent['name']}", class_="mb-1"),
+                        ui.div(status_icons[state], style="font-size: 1.5em;"),
+                        class_=f"agent-card agent-{state}"
+                    ),
+                    class_="col-md-3"
+                )
+            )
+
+            # Add arrow between agents (except last)
+            if i < len(agents) - 1:
+                elements.append(
+                    ui.div(
+                        ui.div("➜", style="font-size: 2em; text-align: center; padding-top: 20px;"),
+                        class_="col-md-auto"
+                    )
+                )
+
+        return ui.div(
+            ui.div(*elements, class_="row align-items-center justify-content-center"),
+            class_="workflow-visual"
+        )
+
+    @output
+    @render.ui
+    def live_updates_display():
+        """Display live streaming updates"""
+        updates = live_updates.get()
+
+        if not updates:
+            if workflow_active.get():
+                return ui.div("🔄 Waiting for agent updates...", class_="text-center p-3 text-muted")
+            else:
+                return ui.div("Ready for streaming workflow...", class_="text-center p-3 text-muted")
+
+        elements = []
+
+        # Show recent updates (last 20)
+        recent_updates = updates[-20:] if len(updates) > 20 else updates
+
+        for update in recent_updates:
+            # Icon and color based on type
+            type_info = {
+                'progress': {'icon': '🔄', 'class': 'update-progress'},
+                'data': {'icon': '✅', 'class': 'update-data'},
+                'complete': {'icon': '🎉', 'class': 'update-complete'},
+                'error': {'icon': '❌', 'class': 'update-error'}
+            }
+
+            info = type_info.get(update['type'], {'icon': 'ℹ️', 'class': 'text-muted'})
+
+            elements.append(
+                ui.div(
+                    f"[{update['timestamp']}] {info['icon']} {update['content']}",
+                    class_=f"{info['class']} mb-1",
+                    style="font-size: 0.9em; line-height: 1.4;"
+                )
+            )
+
+        return ui.div(
+            *elements,
+            class_="live-updates-container"
+        )
+
+    @output
+    @render.ui
+    def final_results_display():
+        """Display final results and recommendations"""
+        results = final_results.get()
+
+        if not results:
+            return ui.div("Final results will appear here after workflow completion...",
+                          class_="text-center p-4 text-muted")
+
+        elements = []
+
+        # Check if we have synthesizer results (final recommendations)
+        if 'synthesizer' in results:
+            synth_data = results['synthesizer']
+            recommendations = synth_data.get('recommendations', [])
+            itineraries = synth_data.get('itineraries', {})
+            climate_summary = synth_data.get('climate_summary', {})
+
+            if recommendations:
+                elements.append(ui.h4("🏆 Top Recommendations"))
+
+                for i, dest in enumerate(recommendations[:3], 1):
+                    city_name = dest['city'].split(',')[0]
+                    status = "🎯" if dest.get('meets_criteria') else "⭐"
+                    score = dest.get('overall_score', 0)
+
+                    # Climate indicators
+                    indicators = []
+                    if dest.get('climate_bonus', 0) > 0:
+                        indicators.append("🌟")
+                    if dest.get('climate_penalty', 0) > 0:
+                        indicators.append("⚡")
+
+                    indicator_str = "".join(indicators)
+
+                    elements.append(
+                        ui.div(
+                            ui.h5(f"{i}. {status} {city_name} {indicator_str} (Score: {score:.1f}/10)"),
+                            ui.p(
+                                f"🌡️ {dest['temp_avg']:.1f}°C | ✈️ {dest.get('flight_time_display', 'N/A')} | 💧 {dest['humidity']:.0f}%"),
+                            ui.p(f"📍 {dest['weather_desc']} | 🛫 {dest.get('routing', 'N/A')}"),
+
+                            # Add itinerary if available
+                            ui.div(
+                                ui.h6(f"🗓️ 4-Day Weather-Appropriate Itinerary:"),
+                                ui.div(
+                                    itineraries.get(city_name, "Itinerary not available"),
+                                    style="white-space: pre-wrap; background: #f8f9fa; padding: 15px; border-radius: 8px; font-family: 'Courier New', monospace; font-size: 0.85em;"
+                                ),
+                                class_="mt-2"
+                            ) if city_name in itineraries else ui.div(),
+
+                            class_="alert alert-success mb-3 p-3"
+                        )
+                    )
+
+                # Climate summary
+                if climate_summary:
+                    elements.append(
+                        ui.div(
+                            ui.h5("🌡️ Climate Analysis Summary"),
+                            ui.p(
+                                f"• Climate alerts: {climate_summary.get('total_alerts', 0)} destinations with unusual weather"),
+                            ui.p(f"• Meeting criteria: {climate_summary.get('meeting_criteria', 0)} destinations"),
+                            ui.p(f"• Itineraries generated: {len(itineraries)} detailed weather-appropriate plans"),
+                            class_="alert alert-info p-3"
+                        )
+                    )
+            else:
+                elements.append(
+                    ui.div("No suitable recommendations found.", class_="alert alert-warning p-3")
+                )
+
+        # Show partial results if workflow is incomplete
+        elif 'analyzer' in results:
+            analyzer_data = results['analyzer']
+            analyzed_destinations = analyzer_data.get('analyzed_destinations', [])
+
+            if analyzed_destinations:
+                elements.append(ui.h4("📊 Analysis Results (Partial)"))
+                for dest in analyzed_destinations[:5]:
+                    city_name = dest['city'].split(',')[0]
+                    score = dest.get('overall_score', 0)
+                    meets_criteria = dest.get('meets_criteria', False)
+
+                    status = "✅" if meets_criteria else "⚠️"
+                    elements.append(
+                        ui.div(f"{status} {city_name}: Score {score:.1f}/10",
+                               class_="alert alert-secondary mb-1 p-2")
+                    )
+
+        elif 'researcher' in results:
+            research_data = results['researcher']
+            flight_results = research_data.get('flight_results', [])
+
+            if flight_results:
+                elements.append(ui.h4("🔍 Research Results (Partial)"))
+                elements.append(ui.p(f"Found {len(flight_results)} destinations with complete weather and flight data"))
+
+        if not elements:
+            elements.append(ui.div("Processing results...", class_="text-center p-3 text-muted"))
+
+        return ui.div(*elements)
 
     @output
     @render.ui
@@ -2205,69 +1873,6 @@ def server(input, output, session):
         status = workflow_status.get()
         alert_class = "alert-info" if "✅" in status else "alert-warning" if "⚠️" in status else "alert-danger"
         return ui.div(ui.p(status, class_="mb-0"), class_=f"alert {alert_class}")
-
-    @output
-    @render.ui
-    def conversation_display():
-        messages = conversation_messages.get()
-        if not messages:
-            return ui.div(
-                ui.h4("🌡️ Enhanced Climate Intelligence & Itinerary System Ready"),
-                ui.p("This enhanced system provides:", class_="mb-2"),
-                ui.div(
-                    ui.p("• Historical climate baselines for any city/month", class_="text-muted mb-1"),
-                    ui.p("• Weather deviation analysis with traveler impact", class_="text-muted mb-1"),
-                    ui.p("• Improved scoring algorithm (addresses Dublin ranking)", class_="text-muted mb-1"),
-                    ui.p("• Diverse city generation (famous + hidden gems)", class_="text-muted mb-1"),
-                    ui.p("• 4-day weather-appropriate itineraries", class_="text-muted mb-1"),
-                    ui.p("• Enhanced error handling & debugging", class_="text-muted mb-1"),
-                ),
-                ui.p(
-                    "Try any travel query - the system now generates diverse destinations and weather-specific itineraries!",
-                    class_="text-primary text-center mt-3"),
-                style="padding: 40px;"
-            )
-
-        agent_info = {
-            AgentRole.PLANNER: {"icon": "🎯", "name": "Strategic Planner", "class": "agent-planner"},
-            AgentRole.RESEARCHER: {"icon": "🔍", "name": "Enhanced Data Researcher", "class": "agent-researcher"},
-            AgentRole.ANALYZER: {"icon": "📊", "name": "Climate Intelligence Analyzer", "class": "agent-analyzer"},
-            AgentRole.SYNTHESIZER: {"icon": "🎯", "name": "Climate-Aware Synthesizer", "class": "agent-synthesizer"}
-        }
-
-        elements = []
-        for msg in messages:
-            info = agent_info[msg.agent_role]
-
-            tools_display = ""
-            if msg.tools_used:
-                tools_display = f"Tools: {', '.join(msg.tools_used)}"
-
-            # Enhanced content formatting for itineraries
-            content = msg.content
-            if "**DAY" in content:
-                # Format itinerary sections with better styling
-                content = content.replace("**DAY", "\n🗓️ **DAY")
-                content = content.replace("- Morning", "\n   🌅 Morning")
-                content = content.replace("- Afternoon", "\n   ☀️ Afternoon")
-                content = content.replace("- Evening", "\n   🌆 Evening")
-                content = content.replace("- Weather Gear:", "\n   🎒 Weather Gear:")
-                content = content.replace("- Backup Plan:", "\n   🏠 Backup Plan:")
-
-            elements.append(
-                ui.div(
-                    ui.div(
-                        ui.span(f"{info['icon']} {info['name']}", class_="agent-name"),
-                        ui.span(tools_display, class_="tools-used") if tools_display else "",
-                        class_="agent-header"
-                    ),
-                    ui.div(content, style="white-space: pre-wrap; line-height: 1.6;"),
-                    ui.div(f"⏱️ {msg.timestamp.strftime('%H:%M:%S')}", class_="timestamp mt-2"),
-                    class_=f"agent-message {info['class']}"
-                )
-            )
-
-        return ui.div(*elements)
 
 
 app = App(app_ui, server)
