@@ -163,7 +163,7 @@ Month: {month_name}"""
 
         try:
             response = self._client.chat.completions.create(
-                model="gpt-4",  # Use GPT-4 for better climate knowledge
+                model="gpt-4o-mini",  # Use GPT-4 for better climate knowledge
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt}
@@ -373,7 +373,7 @@ Typical Patterns: {', '.join(baseline.typical_weather_patterns[:2])}
 Data Reliability: {getattr(baseline, 'data_reliability', 'moderate')}"""
 
             response = self._client.chat.completions.create(
-                model="gpt-4",
+                model="gpt-4o-mini",
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": f"Analyze this weather deviation:\n\n{deviation_summary}"}

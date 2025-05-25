@@ -307,7 +307,7 @@ Create an authentic, local experience optimized for these specific weather condi
 
         try:
             response = self._client.chat.completions.create(
-                model="gpt-4",  # Use GPT-4 for better local knowledge
+                model="gpt-4o-mini",  # Use GPT-4 for better local knowledge
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt}
