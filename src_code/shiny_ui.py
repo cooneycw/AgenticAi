@@ -332,9 +332,19 @@ def server(input, output, session):
     else:
         workflow_status.set("⚠️ Please connect OpenAI API key for enhanced features")
 
-    # Progress callback function
+    # Progress callback function - FIXED VERSION
     def progress_callback(step: ProgressStep):
-        current_progress.set(str(step))
+        try:
+            progress_msg = str(step)
+            print(f"DEBUG: Progress update: {progress_msg}")  # Debug logging
+            current_progress.set(progress_msg)
+
+            # Force UI update by triggering reactive system
+            workflow_status.set(workflow_status.get())  # Trigger reactivity
+
+        except Exception as e:
+            print(f"DEBUG: Progress callback error: {e}")
+            current_progress.set(f"⏳ Working... ({datetime.now().strftime('%H:%M:%S')})")
 
     # Set up progress callback if ai_system exists
     if ai_system:
@@ -543,19 +553,41 @@ def server(input, output, session):
         if not progress:
             return ui.div()
 
-        # Extract progress information if available
+        # Enhanced progress display with better visibility
         if "(" in progress and "/" in progress:
             # Progress with numbers like "Agent 2/4: Research (3/8 cities)"
+            # Extract progress percentage if possible
+            try:
+                if "Researcher" in progress and "(" in progress:
+                    # Extract city progress
+                    match = re.search(r'\((\d+)/(\d+)', progress)
+                    if match:
+                        current, total = int(match.group(1)), int(match.group(2))
+                        percentage = (current / total) * 100
+                        progress_width = f"{percentage}%"
+                    else:
+                        progress_width = "60%"
+                elif "Synthesizer" in progress:
+                    progress_width = "90%"  # Near completion
+                elif "Analyzer" in progress:
+                    progress_width = "75%"  # Analysis phase
+                else:
+                    progress_width = "40%"  # Default
+            except:
+                progress_width = "50%"
+
             return ui.div(
-                ui.div(class_="progress-bar", style="width: 60%; animation: pulse 2s infinite;"),
-                ui.p(progress, class_="progress-text"),
-                class_="mb-2"
+                ui.div(
+                    style=f"width: {progress_width}; height: 6px; background: linear-gradient(90deg, #007bff 0%, #28a745 100%); border-radius: 3px; transition: width 0.5s ease;"
+                ),
+                ui.p(progress, class_="progress-text", style="font-weight: bold; color: #007bff; margin: 8px 0;"),
+                style="background: #f8f9fa; padding: 12px; border-radius: 8px; border-left: 4px solid #007bff; margin-bottom: 15px;"
             )
         else:
-            # Simple progress message
+            # Simple progress message with enhanced visibility
             return ui.div(
-                ui.p(progress, class_="progress-text"),
-                class_="mb-2"
+                ui.p(progress, class_="progress-text", style="font-weight: bold; color: #28a745; margin: 8px 0;"),
+                style="background: #e8f5e9; padding: 12px; border-radius: 8px; border-left: 4px solid #28a745; margin-bottom: 15px;"
             )
 
     @output
