@@ -1,19 +1,18 @@
 # src_code/shiny_ui.py
-"""Enhanced UI with Progress Tracking and Persistent Results - Phase 2.5
+"""Enhanced UI with Debug Console and Reorganized Layout
 
 This enhanced UI provides:
-1. **Real-Time Progress Tracking**: Live updates during workflow execution
-2. **Persistent Results**: Results stay visible with expand/collapse functionality
-3. **Fixed API Integration**: Handles the corrected API calls
-4. **Enhanced Error Display**: Better error handling and user feedback
-5. **Multi-Session Support**: Multiple queries without losing previous results
+1. **Real-Time Debug Console**: Collapsible section showing live debug output
+2. **Reorganized Layout**: Removed API key section, moved status to sidebar
+3. **Enhanced User Experience**: Cleaner interface with better information flow
+4. **Live Debug Tracking**: See exactly what the system is doing in real-time
 
-Key Phase 2.5 enhancements:
-- Real-time progress display with detailed steps
-- Expand/collapse buttons for managing result visibility
-- Persistent results that don't disappear on new queries
-- Better status indicators and error handling
-- Session management for multiple queries
+Key enhancements:
+- Real-time debug console with collapsible interface
+- System status prominently displayed in sidebar
+- Removed API key section (using .env configuration)
+- Enhanced progress tracking with visual indicators
+- Live capture of all debug activity
 """
 from __future__ import annotations
 
@@ -31,16 +30,26 @@ from config.config import (
     OPENWEATHER_KEY,
 )
 from src_code.agentic_core import AgenticAISystem, ProgressStep
+from src_code.debug_logger import setup_debug_capture, debug_logger, debug_info, debug_success
 
 # ---------------------------------------------------------------------------
-# Enhanced system instantiation with progress tracking
+# Enhanced system instantiation with debug capture
 # ---------------------------------------------------------------------------
+
+# Set up debug capture for real-time logging
+debug_logger_instance = setup_debug_capture()
 
 ai_system: AgenticAISystem | None = (
     AgenticAISystem(OPENAI_KEY, OPENWEATHER_KEY, FLIGHTRADAR24_KEY)
     if OPENAI_KEY
     else None
 )
+
+# Log system initialization
+if ai_system:
+    debug_success("Enhanced Agentic AI System initialized successfully")
+else:
+    debug_info("System waiting for OpenAI API key configuration")
 
 
 # ---------------------------------------------------------------------------
@@ -69,7 +78,7 @@ class QuerySession:
 
 
 # ---------------------------------------------------------------------------
-# Enhanced UI layout with progress tracking
+# Enhanced UI layout with debug console and reorganized sidebar
 # ---------------------------------------------------------------------------
 
 app_ui = ui.page_fillable(
@@ -81,10 +90,9 @@ app_ui = ui.page_fillable(
 
     ui.layout_sidebar(
         ui.sidebar(
-            # Connection section
-            ui.h3("Configuration"),
-            ui.input_password("api_key", "OpenAI API Key:", placeholder="sk-..."),
-            ui.input_action_button("connect", "Connect", class_="btn-primary mb-3"),
+            # System Status Section (moved from main area)
+            ui.h3("System Status"),
+            ui.output_ui("system_status_display"),
             ui.hr(),
 
             # Enhanced examples section
@@ -110,14 +118,16 @@ app_ui = ui.page_fillable(
             ui.input_action_button("clear_all", "🗑️ Clear All Results",
                                    class_="btn-outline-danger btn-sm mb-2 w-100"),
             ui.input_action_button("expand_all", "📖 Expand All",
-                                   class_="btn-outline-secondary btn-sm mb-2 w-100"),
+                                   class_="btn-outline-secondary btn-sm mb-1 w-100"),
             ui.input_action_button("collapse_all", "📕 Collapse All",
-                                   class_="btn-outline-secondary btn-sm mb-2 w-100"),
+                                   class_="btn-outline-secondary btn-sm mb-1 w-100"),
+            ui.input_action_button("clear_debug", "🧹 Clear Debug Log",
+                                   class_="btn-outline-warning btn-sm mb-2 w-100"),
             ui.hr(),
 
             # Feature status section
             ui.h5("Enhanced Features"),
-            ui.p("✅ Real-Time Progress Tracking", style="font-size: 0.85em; margin: 2px 0;"),
+            ui.p("✅ Real-Time Debug Console", style="font-size: 0.85em; margin: 2px 0;"),
             ui.p("✅ Persistent Results with Expand/Collapse", style="font-size: 0.85em; margin: 2px 0;"),
             ui.p("✅ FlightRadar24 Real Flight Data", style="font-size: 0.85em; margin: 2px 0;"),
             ui.p("✅ 80+ Airport Database Worldwide", style="font-size: 0.85em; margin: 2px 0;"),
@@ -126,7 +136,7 @@ app_ui = ui.page_fillable(
             ui.p("✅ Weather Deviation Analysis", style="font-size: 0.85em; margin: 2px 0;"),
             ui.p("✅ 4-Day Weather Itineraries", style="font-size: 0.85em; margin: 2px 0;"),
 
-            width=320
+            width=340  # Slightly wider for status display
         ),
 
         ui.div(
@@ -144,10 +154,21 @@ app_ui = ui.page_fillable(
                 class_="mb-4"
             ),
 
-            # Status display with progress
+            # Progress display
             ui.div(
-                ui.output_ui("status_display"),
                 ui.output_ui("progress_display"),
+                class_="mb-3"
+            ),
+
+            # Debug console section (collapsible)
+            ui.div(
+                ui.input_action_button("toggle_debug", "🔍 Debug Console",
+                                       class_="btn-outline-info mb-2"),
+                ui.div(
+                    ui.output_ui("debug_console"),
+                    id="debug_section",
+                    class_="debug-section"
+                ),
                 class_="mb-3"
             ),
 
@@ -160,11 +181,68 @@ app_ui = ui.page_fillable(
         )
     ),
 
-    # Enhanced CSS styling with progress indicators
+    # Enhanced CSS styling with debug console
     ui.tags.style("""
         .sessions-container {
-            max-height: 700px;
+            max-height: 600px;
             overflow-y: auto;
+        }
+        .debug-section {
+            max-height: 300px;
+            overflow-y: auto;
+            background: #1a1a1a;
+            border: 1px solid #333;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            display: none; /* Initially hidden */
+        }
+        .debug-section.expanded {
+            display: block;
+        }
+        .debug-console {
+            font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+            font-size: 12px;
+            line-height: 1.4;
+            color: #e0e0e0;
+            background: #1a1a1a;
+            padding: 15px;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+        .debug-entry {
+            margin-bottom: 2px;
+            padding: 2px 0;
+        }
+        .debug-entry.debug-INFO {
+            color: #4CAF50;
+        }
+        .debug-entry.debug-WARN {
+            color: #FF9800;
+        }
+        .debug-entry.debug-ERROR {
+            color: #F44336;
+        }
+        .debug-entry.debug-SUCCESS {
+            color: #00E676;
+        }
+        .debug-entry.debug-DEBUG {
+            color: #9E9E9E;
+        }
+        .system-status {
+            background: linear-gradient(135deg, #e8f5e9 0%, #c8e6c9 100%);
+            padding: 12px;
+            border-radius: 8px;
+            border-left: 4px solid #4CAF50;
+            margin-bottom: 15px;
+            font-size: 0.9em;
+        }
+        .system-status.warning {
+            background: linear-gradient(135deg, #fff3e0 0%, #ffcc02 100%);
+            border-left-color: #FF9800;
+        }
+        .system-status.error {
+            background: linear-gradient(135deg, #ffebee 0%, #ffcdd2 100%);
+            border-left-color: #F44336;
         }
         .session-card {
             margin-bottom: 25px;
@@ -240,18 +318,31 @@ app_ui = ui.page_fillable(
             padding: 3px 6px;
             border-radius: 4px;
         }
+        .progress-container {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 8px;
+            border-left: 4px solid #007bff;
+            margin-bottom: 15px;
+        }
+        .progress-bar-container {
+            background: #e9ecef;
+            height: 8px;
+            border-radius: 4px;
+            overflow: hidden;
+            margin-bottom: 10px;
+        }
         .progress-bar {
+            height: 100%;
             background: linear-gradient(90deg, #007bff 0%, #28a745 100%);
-            height: 4px;
-            border-radius: 2px;
-            margin: 10px 0;
-            transition: all 0.3s ease;
+            border-radius: 4px;
+            transition: width 0.5s ease;
         }
         .progress-text {
-            font-size: 0.9em;
-            color: #666;
-            margin: 5px 0;
-            font-family: monospace;
+            font-weight: bold;
+            color: #007bff;
+            margin: 0;
+            font-size: 0.95em;
         }
         .btn-toggle {
             background: rgba(255,255,255,0.2);
@@ -284,41 +375,100 @@ app_ui = ui.page_fillable(
             border-radius: 8px;
             backdrop-filter: blur(10px);
         }
-        .error-message {
-            background: linear-gradient(135deg, #f8d7da 0%, #f5c6cb 100%);
-            border: 1px solid #f5c6cb;
-            color: #721c24;
-            padding: 15px;
-            border-radius: 8px;
-            margin: 10px 0;
-        }
-        .success-message {
-            background: linear-gradient(135deg, #d4edda 0%, #c3e6cb 100%);
-            border: 1px solid #c3e6cb;
-            color: #155724;
-            padding: 15px;
-            border-radius: 8px;
-            margin: 10px 0;
+    """),
+
+    # JavaScript for debug console toggle
+    ui.tags.script("""
+        // Debug console toggle functionality
+        document.addEventListener('DOMContentLoaded', function() {
+            let debugExpanded = false;
+
+            function toggleDebugConsole() {
+                const debugSection = document.getElementById('debug_section');
+                const toggleButton = document.querySelector('[id="toggle_debug"]');
+
+                if (debugSection && toggleButton) {
+                    debugExpanded = !debugExpanded;
+
+                    if (debugExpanded) {
+                        debugSection.classList.add('expanded');
+                        toggleButton.textContent = '🔍 Hide Debug Console';
+                    } else {
+                        debugSection.classList.remove('expanded');
+                        toggleButton.textContent = '🔍 Debug Console';
+                    }
+                }
+            }
+
+            // Add click listener to debug toggle button
+            const toggleButton = document.querySelector('[id="toggle_debug"]');
+            if (toggleButton) {
+                toggleButton.addEventListener('click', toggleDebugConsole);
+            }
+        });
+
+        // Session toggle functionality (existing)
+        function toggleSession(sessionId) {
+            const session = document.getElementById(sessionId);
+            const isCollapsed = session.classList.contains('session-collapsed');
+
+            if (isCollapsed) {
+                session.classList.remove('session-collapsed');
+            } else {
+                session.classList.add('session-collapsed');
+            }
+
+            const button = session.querySelector('.btn-toggle');
+            button.textContent = isCollapsed ? '📕 Collapse' : '📖 Expand';
         }
     """)
 )
 
 
 # ---------------------------------------------------------------------------
-# Enhanced server logic with progress tracking and persistence
+# Enhanced server logic with debug integration
 # ---------------------------------------------------------------------------
 
 def server(input, output, session):
     workflow_status = reactive.Value("🔗 Enhanced System Ready")
     current_progress = reactive.Value("")
     query_sessions: reactive.Value[List[QuerySession]] = reactive.Value([])
+    debug_entries = reactive.Value([])
 
-    # Initialize status based on available APIs
+    # Set up debug callback to update UI
+    def debug_callback(entry: str):
+        try:
+            current_entries = debug_entries.get()
+            current_entries.append(entry)
+            # Keep only last 100 entries for performance
+            if len(current_entries) > 100:
+                current_entries = current_entries[-100:]
+            debug_entries.set(current_entries)
+        except Exception as e:
+            print(f"Debug callback error: {e}")
+
+    debug_logger_instance.set_callback(debug_callback)
+
+    # Enhanced progress callback with debug integration
+    def progress_callback(step: ProgressStep):
+        try:
+            progress_msg = str(step)
+            debug_info(f"Progress: {progress_msg}")
+            current_progress.set(progress_msg)
+            workflow_status.set(workflow_status.get())  # Trigger reactivity
+        except Exception as e:
+            debug_info(f"Progress callback error: {e}")
+            current_progress.set(f"⏳ Working... ({datetime.now().strftime('%H:%M:%S')})")
+
+    # Set up progress callback if ai_system exists
+    if ai_system:
+        ai_system.set_progress_callback(progress_callback)
+
+    # Initialize system status
     if ai_system:
         api_status = []
         api_status.append("OpenAI ✅")
 
-        # Show which weather API we're using
         if OPENWEATHER_KEY:
             api_status.append("OpenWeatherMap (Paid) ✅")
         else:
@@ -329,57 +479,9 @@ def server(input, output, session):
         api_status.append("Itinerary Generation ✅")
 
         workflow_status.set(f"✅ Enhanced System Ready | {' | '.join(api_status)}")
+        debug_success(f"System initialized with APIs: {' | '.join(api_status)}")
     else:
-        workflow_status.set("⚠️ Please connect OpenAI API key for enhanced features")
-
-    # Progress callback function - FIXED VERSION
-    def progress_callback(step: ProgressStep):
-        try:
-            progress_msg = str(step)
-            print(f"DEBUG: Progress update: {progress_msg}")  # Debug logging
-            current_progress.set(progress_msg)
-
-            # Force UI update by triggering reactive system
-            workflow_status.set(workflow_status.get())  # Trigger reactivity
-
-        except Exception as e:
-            print(f"DEBUG: Progress callback error: {e}")
-            current_progress.set(f"⏳ Working... ({datetime.now().strftime('%H:%M:%S')})")
-
-    # Set up progress callback if ai_system exists
-    if ai_system:
-        ai_system.set_progress_callback(progress_callback)
-
-    # ---------------------------------------------------- connection button
-    @reactive.Effect
-    @reactive.event(input.connect)
-    def _connect():
-        global ai_system
-        key = input.api_key() or OPENAI_KEY
-        if not key:
-            workflow_status.set("❌ Enter an OpenAI API key first")
-            return
-        try:
-            ai_system = AgenticAISystem(key, OPENWEATHER_KEY, FLIGHTRADAR24_KEY)
-            ai_system.set_progress_callback(progress_callback)
-
-            # Enhanced status with API availability
-            api_status = []
-            api_status.append("OpenAI ✅")
-
-            # Show which weather API we're using
-            if OPENWEATHER_KEY:
-                api_status.append("OpenWeatherMap (Paid) ✅")
-            else:
-                api_status.append("Weather API (Free) ⚠️")
-
-            api_status.append("FR24 API " + ("✅" if FLIGHTRADAR24_KEY else "❌"))
-            api_status.append("Climate Intelligence ✅")
-            api_status.append("Itinerary Generation ✅")
-
-            workflow_status.set(f"✅ Enhanced System Connected | {' | '.join(api_status)}")
-        except Exception as exc:
-            workflow_status.set(f"❌ Connection failed: {exc}")
+        workflow_status.set("⚠️ Please configure OpenAI API key in .env file")
 
     # ---------------------------------------------------- example buttons
     @reactive.Effect
@@ -430,6 +532,7 @@ def server(input, output, session):
     def _clear_all():
         query_sessions.set([])
         current_progress.set("")
+        debug_info("All query sessions cleared")
         workflow_status.set("🗑️ All sessions cleared")
 
     @reactive.Effect
@@ -439,6 +542,7 @@ def server(input, output, session):
         for session in sessions:
             session.expanded = True
         query_sessions.set(sessions)
+        debug_info("All sessions expanded")
 
     @reactive.Effect
     @reactive.event(input.collapse_all)
@@ -447,60 +551,78 @@ def server(input, output, session):
         for session in sessions:
             session.expanded = False
         query_sessions.set(sessions)
+        debug_info("All sessions collapsed")
+
+    @reactive.Effect
+    @reactive.event(input.clear_debug)
+    def _clear_debug():
+        debug_logger_instance.clear()
+        debug_entries.set([])
+        debug_success("Debug log cleared")
 
     # ---------------------------------------------------- run workflow
     @reactive.Effect
     @reactive.event(input.run)
     async def _run():
         if ai_system is None:
-            workflow_status.set("❌ Please connect to OpenAI API first")
+            workflow_status.set("❌ Please configure OpenAI API key in .env file")
             return
         query = input.user_query().strip()
         if not query:
             workflow_status.set("⚠️ Please enter a travel query")
             return
 
+        debug_info(f"Starting new query: {query[:50]}...")
+
         # Create new session
         new_session = QuerySession(query, datetime.now())
         sessions = query_sessions.get()
-        sessions.insert(0, new_session)  # Add to top
+        sessions.insert(0, new_session)
         query_sessions.set(sessions)
 
         workflow_status.set("🔄 Enhanced AI agents working with climate intelligence & itinerary generation...")
         current_progress.set("🚀 Initializing enhanced workflow...")
 
         try:
+            debug_info("Launching agentic workflow...")
             msgs = await ai_system.run_agentic_workflow(query)
+            debug_success(f"Workflow completed with {len(msgs)} agent messages")
 
-            # Update session with results
-            sessions = query_sessions.get()
-            for session in sessions:
+            # Update the specific session with results
+            current_sessions = query_sessions.get()
+            target_session = None
+
+            for session in current_sessions:
                 if session.session_id == new_session.session_id:
-                    session.messages = msgs
-                    session.completed = True
-
-                    # Enhanced completion status
-                    itinerary_count = 0
-                    climate_alerts = 0
-
-                    # Count generated features
-                    for msg in msgs:
-                        if msg.metadata:
-                            itinerary_count += msg.metadata.get("itineraries_generated", 0)
-                            alerts = msg.metadata.get("climate_alerts", [])
-                            if alerts:
-                                climate_alerts = len(alerts)
-
-                    status_parts = ["✅ Complete"]
-                    if itinerary_count > 0:
-                        status_parts.append(f"{itinerary_count} itineraries")
-                    if climate_alerts > 0:
-                        status_parts.append(f"{climate_alerts} climate alerts")
-
-                    session.status = " | ".join(status_parts)
+                    target_session = session
                     break
 
-            query_sessions.set(sessions)
+            if target_session:
+                target_session.messages = msgs
+                target_session.completed = True
+
+                # Count generated features
+                itinerary_count = 0
+                climate_alerts = 0
+
+                for msg in msgs:
+                    if msg.metadata:
+                        itinerary_count += msg.metadata.get("itineraries_generated", 0)
+                        alerts = msg.metadata.get("climate_alerts", [])
+                        if alerts:
+                            climate_alerts = len(alerts)
+
+                status_parts = ["✅ Complete"]
+                if itinerary_count > 0:
+                    status_parts.append(f"{itinerary_count} itineraries")
+                if climate_alerts > 0:
+                    status_parts.append(f"{climate_alerts} climate alerts")
+
+                target_session.status = " | ".join(status_parts)
+                query_sessions.set(current_sessions)
+
+                debug_success(f"Session updated: {itinerary_count} itineraries, {climate_alerts} climate alerts")
+
             current_progress.set("✅ Workflow completed successfully")
 
             # Update main status
@@ -513,93 +635,129 @@ def server(input, output, session):
             workflow_status.set(" | ".join(status_parts))
 
         except Exception as e:
+            debug_info(f"Workflow error: {str(e)}")
+
             # Update session with error
-            sessions = query_sessions.get()
-            for session in sessions:
+            current_sessions = query_sessions.get()
+            for session in current_sessions:
                 if session.session_id == new_session.session_id:
                     session.status = f"❌ Error: {str(e)[:50]}..."
                     session.completed = True
                     break
-            query_sessions.set(sessions)
+            query_sessions.set(current_sessions)
 
             workflow_status.set(f"❌ Enhanced workflow failed: {str(e)}")
             current_progress.set(f"❌ Error: {str(e)}")
-            print(f"Workflow error: {e}")
 
     # ---------------------------------------------------- outputs
     @output
     @render.ui
-    def status_display():
+    def system_status_display():
+        """Display system status in sidebar."""
         status = workflow_status.get()
 
-        # Determine alert class based on status
         if status.startswith("✅"):
-            alert_class = "alert-success"
+            status_class = "system-status"
         elif status.startswith("⚠️"):
-            alert_class = "alert-warning"
+            status_class = "system-status warning"
         elif status.startswith("❌"):
-            alert_class = "alert-danger"
-        elif status.startswith("🔄"):
-            alert_class = "alert-info"
+            status_class = "system-status error"
         else:
-            alert_class = "alert-info"
+            status_class = "system-status"
 
-        return ui.div(ui.p(status, class_="mb-0"), class_=f"alert {alert_class}")
+        return ui.div(
+            ui.p(status, style="margin: 0; font-weight: 500; line-height: 1.3;"),
+            class_=status_class
+        )
 
     @output
     @render.ui
     def progress_display():
+        """Enhanced progress display with visual indicators."""
         progress = current_progress.get()
         if not progress:
             return ui.div()
 
-        # Enhanced progress display with better visibility
-        if "(" in progress and "/" in progress:
-            # Progress with numbers like "Agent 2/4: Research (3/8 cities)"
-            # Extract progress percentage if possible
+        # Calculate progress percentage
+        progress_width = "0%"
+        if "Researcher" in progress and "(" in progress:
             try:
-                if "Researcher" in progress and "(" in progress:
-                    # Extract city progress
-                    match = re.search(r'\((\d+)/(\d+)', progress)
-                    if match:
-                        current, total = int(match.group(1)), int(match.group(2))
-                        percentage = (current / total) * 100
-                        progress_width = f"{percentage}%"
-                    else:
-                        progress_width = "60%"
-                elif "Synthesizer" in progress:
-                    progress_width = "90%"  # Near completion
-                elif "Analyzer" in progress:
-                    progress_width = "75%"  # Analysis phase
+                match = re.search(r'\((\d+)/(\d+)', progress)
+                if match:
+                    current, total = int(match.group(1)), int(match.group(2))
+                    percentage = (current / total) * 50  # Research is 50% of total
+                    progress_width = f"{percentage}%"
                 else:
-                    progress_width = "40%"  # Default
+                    progress_width = "25%"
             except:
-                progress_width = "50%"
-
-            return ui.div(
-                ui.div(
-                    style=f"width: {progress_width}; height: 6px; background: linear-gradient(90deg, #007bff 0%, #28a745 100%); border-radius: 3px; transition: width 0.5s ease;"
-                ),
-                ui.p(progress, class_="progress-text", style="font-weight: bold; color: #007bff; margin: 8px 0;"),
-                style="background: #f8f9fa; padding: 12px; border-radius: 8px; border-left: 4px solid #007bff; margin-bottom: 15px;"
-            )
+                progress_width = "25%"
+        elif "Analyzer" in progress:
+            progress_width = "70%"
+        elif "Synthesizer" in progress:
+            if "Creating itineraries" in progress:
+                progress_width = "85%"
+            else:
+                progress_width = "95%"
+        elif "Complete" in progress:
+            progress_width = "100%"
         else:
-            # Simple progress message with enhanced visibility
+            progress_width = "10%"
+
+        return ui.div(
+            ui.div(
+                ui.div(
+                    style=f"width: {progress_width};",
+                    class_="progress-bar"
+                ),
+                class_="progress-bar-container"
+            ),
+            ui.p(progress, class_="progress-text"),
+            class_="progress-container"
+        )
+
+    @output
+    @render.ui
+    def debug_console():
+        """Real-time debug console display."""
+        entries = debug_entries.get()
+        if not entries:
             return ui.div(
-                ui.p(progress, class_="progress-text", style="font-weight: bold; color: #28a745; margin: 8px 0;"),
-                style="background: #e8f5e9; padding: 12px; border-radius: 8px; border-left: 4px solid #28a745; margin-bottom: 15px;"
+                ui.p("Debug console ready. Activity will appear here in real-time.",
+                     style="color: #666; font-style: italic; margin: 20px;"),
+                class_="debug-console"
             )
+
+        # Create debug entry elements
+        entry_elements = []
+        for entry in entries[-50:]:  # Show last 50 entries
+            # Determine entry type from level
+            if ": " in entry:
+                level = entry.split(": ", 1)[0].split("] ")[-1] if "] " in entry else "DEBUG"
+                entry_class = f"debug-entry debug-{level}"
+            else:
+                entry_class = "debug-entry debug-DEBUG"
+
+            entry_elements.append(
+                ui.div(entry, class_=entry_class)
+            )
+
+        return ui.div(
+            *entry_elements,
+            class_="debug-console",
+            style="max-height: 280px; overflow-y: auto;"
+        )
 
     @output
     @render.ui
     def sessions_display():
+        """Enhanced sessions display with better organization."""
         sessions = query_sessions.get()
         if not sessions:
             return ui.div(
                 ui.div(
-                    ui.h4("🌍 Enhanced Climate Intelligence & Itinerary System",
+                    ui.h4("🌍 Enhanced Climate Intelligence & Flight System",
                           style="color: white; margin-bottom: 20px;"),
-                    ui.p("Ready to provide comprehensive travel planning with:",
+                    ui.p("Ready to provide comprehensive travel planning with real-time debug visibility!",
                          style="color: rgba(255,255,255,0.9); margin-bottom: 15px;"),
 
                     ui.div(
@@ -634,12 +792,12 @@ def server(input, output, session):
                             class_="feature-card"
                         ),
                         ui.div(
-                            ui.h6("🎯 Enhanced Analysis", style="color: white; margin-bottom: 8px;"),
-                            ui.p("• Real-time progress tracking",
+                            ui.h6("🔍 Debug Console", style="color: white; margin-bottom: 8px;"),
+                            ui.p("• Real-time debug output visibility",
                                  style="color: rgba(255,255,255,0.8); font-size: 0.9em; margin: 2px 0;"),
-                            ui.p("• Persistent results with expand/collapse",
+                            ui.p("• API call tracking and status",
                                  style="color: rgba(255,255,255,0.8); font-size: 0.9em; margin: 2px 0;"),
-                            ui.p("• Comprehensive climate + flight scoring",
+                            ui.p("• Detailed workflow progress",
                                  style="color: rgba(255,255,255,0.8); font-size: 0.9em; margin: 2px 0;"),
                             class_="feature-card"
                         ),
@@ -647,14 +805,14 @@ def server(input, output, session):
                     ),
 
                     ui.p(
-                        "👆 Try any example above or enter your own travel query to see the enhanced system in action!",
+                        "👆 Try any example above and watch the debug console for real-time activity!",
                         style="color: white; text-align: center; margin-top: 30px; font-weight: 500;"
                     ),
                     class_="welcome-content"
                 )
             )
 
-        # Enhanced agent info with better styling
+        # Enhanced agent info
         agent_info = {
             AgentRole.PLANNER: {"icon": "🎯", "name": "Strategic Planner", "class": "agent-planner"},
             AgentRole.RESEARCHER: {"icon": "🔍", "name": "Enhanced Data Researcher", "class": "agent-researcher"},
@@ -741,28 +899,7 @@ def server(input, output, session):
                 )
             )
 
-        # Add JavaScript for toggle functionality
-        toggle_script = ui.tags.script("""
-            function toggleSession(sessionId) {
-                const session = document.getElementById(sessionId);
-                const isCollapsed = session.classList.contains('session-collapsed');
-
-                if (isCollapsed) {
-                    session.classList.remove('session-collapsed');
-                } else {
-                    session.classList.add('session-collapsed');
-                }
-
-                // Update button text
-                const button = session.querySelector('.btn-toggle');
-                button.textContent = isCollapsed ? '📕 Collapse' : '📖 Expand';
-            }
-        """)
-
-        return ui.div(
-            *session_elements,
-            toggle_script
-        )
+        return ui.div(*session_elements)
 
 
 # ---------------------------------------------------------------------------
@@ -776,6 +913,6 @@ app = App(app_ui, server)
 # ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
-    print("🚀 Starting Enhanced Agentic Travel Planner with Phase 3 features...")
-    print("📍 Features: Climate Intelligence + Weather Itineraries + Real Flight Data + Progress Tracking")
+    print("🚀 Starting Enhanced Agentic Travel Planner with Debug Console...")
+    print("📍 Features: Real-time Debug Console + All Previous Enhancements")
     app.run(debug=True)
