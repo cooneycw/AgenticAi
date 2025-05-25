@@ -1,5 +1,5 @@
 # src_code/shiny_ui.py
-"""Enhanced UI with Structured Data Display
+"""Enhanced UI with Structured Data Display - COMPLETE REWRITE
 
 This enhanced UI properly extracts and displays:
 1. **Recommended Cities**: With weather and climate data
@@ -9,6 +9,7 @@ This enhanced UI properly extracts and displays:
 5. **Real-Time Debug Console**: For transparency
 
 Key improvements:
+- Clean, organized code structure
 - Structured data extraction from agent messages
 - Dedicated sections for cities, flights, and itineraries
 - Improved content formatting and organization
@@ -241,7 +242,7 @@ app_ui = ui.page_fillable(
                 class_="mb-3"
             ),
 
-            # Debug console section (now visible by default for testing)
+            # Debug console section
             ui.div(
                 ui.input_action_button("toggle_debug", "🔍 Hide Debug Console",
                                        class_="btn-outline-info mb-2"),
@@ -262,7 +263,7 @@ app_ui = ui.page_fillable(
         )
     ),
 
-    # Enhanced CSS styling with better data display
+    # Enhanced CSS styling
     ui.tags.style("""
         .sessions-container {
             max-height: 800px;
@@ -294,15 +295,6 @@ app_ui = ui.page_fillable(
             min-height: 200px;
             border-radius: 6px;
         }
-        .debug-entry {
-            margin-bottom: 2px;
-            padding: 2px 0;
-        }
-        .debug-entry.debug-INFO { color: #4CAF50; }
-        .debug-entry.debug-WARN { color: #FF9800; }
-        .debug-entry.debug-ERROR { color: #F44336; }
-        .debug-entry.debug-SUCCESS { color: #00E676; }
-        .debug-entry.debug-DEBUG { color: #9E9E9E; }
 
         .system-status {
             background: linear-gradient(135deg, #e8f5e9 0%, #c8e6c9 100%);
@@ -350,7 +342,6 @@ app_ui = ui.page_fillable(
             display: none;
         }
 
-        /* Enhanced structured data sections */
         .data-section {
             margin-bottom: 25px;
             border: 1px solid #e0e0e0;
@@ -537,12 +528,10 @@ app_ui = ui.page_fillable(
         }
     """),
 
-    # Simplified JavaScript with minimal diagnostics
+    # JavaScript for UI interactions
     ui.tags.script("""
-        // Global debug state - start with visible (matching CSS)
         let debugExpanded = true;
 
-        // Simplified debug console toggle
         function toggleDebugConsole() {
             const debugSection = document.getElementById('debug_section');
             const toggleButton = document.getElementById('toggle_debug');
@@ -560,7 +549,6 @@ app_ui = ui.page_fillable(
             }
         }
 
-        // Session toggle functionality
         function toggleSession(sessionId) {
             const session = document.getElementById(sessionId);
             if (!session) return;
@@ -578,22 +566,18 @@ app_ui = ui.page_fillable(
             }
         }
 
-        // Setup debug console
         function setupDebugConsole() {
             const toggleButton = document.getElementById('toggle_debug');
-
             if (toggleButton) {
                 toggleButton.onclick = function(e) {
                     e.preventDefault();
                     toggleDebugConsole();
                     return false;
                 };
-                // Set initial button text
                 toggleButton.textContent = '🔍 Hide Debug Console';
             }
         }
 
-        // Setup when ready
         document.addEventListener('DOMContentLoaded', setupDebugConsole);
         setTimeout(setupDebugConsole, 1000);
     """)
@@ -610,33 +594,27 @@ def server(input, output, session):
     query_sessions: reactive.Value[List[EnhancedQuerySession]] = reactive.Value([])
     debug_entries = reactive.Value([])
 
-    # Internal debug entries list (not reactive)
+    # Internal debug entries list
     internal_debug_entries: List[str] = []
-    debug_state = {"callback_running": False}  # Use mutable object for recursion guard
+    debug_state = {"callback_running": False}
 
-    # Fixed debug callback - maintain external list and only use .set()
+    # Debug callback
     def debug_callback(entry: str):
-        # Prevent recursive calls
         if debug_state["callback_running"]:
             return
 
         debug_state["callback_running"] = True
-
         try:
-            # Append to internal buffer and update reactive.Value without .get()
             internal_debug_entries.append(entry)
             if len(internal_debug_entries) > 100:
                 del internal_debug_entries[:-100]
-
-            # Push a copy into reactive.Value (works outside reactive context)
             debug_entries.set(internal_debug_entries.copy())
-
         finally:
             debug_state["callback_running"] = False
 
     debug_logger_instance.set_callback(debug_callback)
 
-    # ——— NEW: background AI workflow coroutine ———
+    # Background AI workflow
     async def _workflow(query: str):
         return await ai_system.run_agentic_workflow(query)
 
@@ -648,7 +626,6 @@ def server(input, output, session):
             progress_msg = str(step)
             debug_info(f"Progress: {progress_msg}")
             current_progress.set(progress_msg)
-            workflow_status.set(workflow_status.get())
         except Exception as e:
             debug_info(f"Progress callback error: {e}")
             current_progress.set(f"⏳ Working... ({datetime.now().strftime('%H:%M:%S')})")
@@ -656,14 +633,12 @@ def server(input, output, session):
     if ai_system:
         ai_system.set_progress_callback(progress_callback)
 
-    # Force UI update when debug entries change (reactive effect)
+    # Force UI update when debug entries change
     @reactive.Effect
     def _debug_entries_changed():
         entries = debug_entries.get()
-        # This effect runs whenever debug_entries changes
-        # Forces UI to re-render debug console automatically
 
-    # Initialize system status and add initial debug entries
+    # Initialize system status
     if ai_system:
         api_status = ["OpenAI ✅"]
         api_status.append("OpenWeatherMap (Paid) ✅" if OPENWEATHER_KEY else "Weather API (Free) ⚠️")
@@ -672,63 +647,50 @@ def server(input, output, session):
         api_status.append("Structured Data Display ✅")
         workflow_status.set(f"✅ Enhanced System Ready | {' | '.join(api_status)}")
 
-        # Add initial debug entries using the callback (proper way)
-        debug_callback(
-            f"[{datetime.now().strftime('%H:%M:%S.%f')[:-3]}] SUCCESS: Enhanced Agentic AI System initialized successfully")
-        debug_callback(
-            f"[{datetime.now().strftime('%H:%M:%S.%f')[:-3]}] INFO: System initialized with APIs: {' | '.join(api_status)}")
-        debug_callback(
-            f"[{datetime.now().strftime('%H:%M:%S.%f')[:-3]}] INFO: Enhanced Agentic Travel Planner ready for queries")
-        debug_callback(
-            f"[{datetime.now().strftime('%H:%M:%S.%f')[:-3]}] INFO: Debug console is working - you should see this message!")
-
+        # Add initial debug entries
+        debug_callback(f"[{datetime.now().strftime('%H:%M:%S.%f')[:-3]}] SUCCESS: Enhanced Agentic AI System initialized successfully")
+        debug_callback(f"[{datetime.now().strftime('%H:%M:%S.%f')[:-3]}] INFO: System initialized with APIs: {' | '.join(api_status)}")
+        debug_callback(f"[{datetime.now().strftime('%H:%M:%S.%f')[:-3]}] INFO: Enhanced Agentic Travel Planner ready for queries")
+        debug_callback(f"[{datetime.now().strftime('%H:%M:%S.%f')[:-3]}] INFO: Debug console is working - you should see this message!")
     else:
         workflow_status.set("⚠️ Please configure OpenAI API key in .env file")
-        debug_callback(
-            f"[{datetime.now().strftime('%H:%M:%S.%f')[:-3]}] WARN: System waiting for OpenAI API key configuration")
+        debug_callback(f"[{datetime.now().strftime('%H:%M:%S.%f')[:-3]}] WARN: System waiting for OpenAI API key configuration")
 
     # Example button handlers
     @reactive.Effect
     @reactive.event(input.example1)
     def _example1():
-        ui.update_text_area("user_query",
-                            value="Find European destinations with temperatures between 18-25°C in 1 week, include comprehensive climate analysis, real flight data, and flight recommendations")
+        ui.update_text_area("user_query", value="Find European destinations with temperatures between 18-25°C in 1 week, include comprehensive climate analysis, real flight data, and flight recommendations")
 
     @reactive.Effect
     @reactive.event(input.example2)
     def _example2():
-        ui.update_text_area("user_query",
-                            value="Find diverse Asian cities with warm weather next Friday, analyze real FlightRadar24 flight data and generate detailed 4-day weather-appropriate itineraries")
+        ui.update_text_area("user_query", value="Find diverse Asian cities with warm weather next Friday, analyze real FlightRadar24 flight data and generate detailed 4-day weather-appropriate itineraries")
 
     @reactive.Effect
     @reactive.event(input.example3)
     def _example3():
-        ui.update_text_area("user_query",
-                            value="Mexican coastal destinations with 25-30°C weather in 5 days, analyze flight routes and provide scored flight recommendations")
+        ui.update_text_area("user_query", value="Mexican coastal destinations with 25-30°C weather in 5 days, analyze flight routes and provide scored flight recommendations")
 
     @reactive.Effect
     @reactive.event(input.example4)
     def _example4():
-        ui.update_text_area("user_query",
-                            value="Find cooler European destinations with 5-15°C in 10 days from Toronto, include flight analysis and weather anomaly alerts")
+        ui.update_text_area("user_query", value="Find cooler European destinations with 5-15°C in 10 days from Toronto, include flight analysis and weather anomaly alerts")
 
     @reactive.Effect
     @reactive.event(input.example5)
     def _example5():
-        ui.update_text_area("user_query",
-                            value="South American cities next month, check for climate deviations, real flight schedules, and comprehensive travel analysis")
+        ui.update_text_area("user_query", value="South American cities next month, check for climate deviations, real flight schedules, and comprehensive travel analysis")
 
     @reactive.Effect
     @reactive.event(input.example6)
     def _example6():
-        ui.update_text_area("user_query",
-                            value="Compare flights to diverse European cities in 2 weeks, show FlightRadar24 data, airline ratings, and climate intelligence")
+        ui.update_text_area("user_query", value="Compare flights to diverse European cities in 2 weeks, show FlightRadar24 data, airline ratings, and climate intelligence")
 
     @reactive.Effect
     @reactive.event(input.example7)
     def _example7():
-        ui.update_text_area("user_query",
-                            value="Find 3 diverse European destinations with 20-27°C next Friday, include historical climate baselines, weather deviation analysis, real FlightRadar24 flight data with airline recommendations, and detailed 4-day weather-appropriate itineraries")
+        ui.update_text_area("user_query", value="Find 3 diverse European destinations with 20-27°C next Friday, include historical climate baselines, weather deviation analysis, real FlightRadar24 flight data with airline recommendations, and detailed 4-day weather-appropriate itineraries")
 
     # Session management
     @reactive.Effect
@@ -760,11 +722,9 @@ def server(input, output, session):
     @reactive.Effect
     @reactive.event(input.clear_debug)
     def _clear_debug():
-        # Clear both internal list and reactive value
         internal_debug_entries.clear()
         debug_entries.set([])
         debug_logger_instance.clear()
-        # Add confirmation message
         debug_callback(f"[{datetime.now().strftime('%H:%M:%S.%f')[:-3]}] SUCCESS: Debug log cleared")
 
     @reactive.Effect
@@ -776,7 +736,7 @@ def server(input, output, session):
         debug_callback(f"[{current_time}.789] INFO: You can now run queries to see real-time debug output")
         debug_callback(f"[{current_time}.999] INFO: Try clicking one of the example buttons above")
 
-    # —— NON-BLOCKING: kick off workflow in background ——
+    # Run workflow
     @reactive.Effect
     @reactive.event(input.run)
     def _on_run():
@@ -789,7 +749,6 @@ def server(input, output, session):
             workflow_status.set("⚠️ Please enter a travel query")
             return
 
-        # log and insert placeholder session
         debug_info(f"Starting new query: {query[:50]}...")
         new_session = EnhancedQuerySession(query, datetime.now())
         sessions = query_sessions.get()
@@ -799,41 +758,32 @@ def server(input, output, session):
         workflow_status.set("🔄 Enhanced AI agents working…")
         current_progress.set("🚀 Initializing enhanced workflow…")
 
-        # non-blocking handoff
         workflow_task.invoke(query)
 
-    # ——— WHEN the background workflow finishes ———
+    # When workflow finishes
     @reactive.Effect
     def _on_done():
         try:
-            # Block only this effect until the background task finishes
             msgs = workflow_task.result()
         except asyncio.CancelledError:
-            # A previous invocation was cancelled; ignore it
             return
         except Exception as e:
-            # Swallow all of our “silent” internal exceptions
             if type(e).__name__.startswith("Silent"):
                 return
-            # Otherwise treat it as a real error
             debug_info(f"❌ Workflow error ({type(e).__name__}): {e!r}")
             workflow_status.set(f"❌ Enhanced workflow failed: {type(e).__name__}")
             current_progress.set(f"❌ Error: {type(e).__name__}")
             return
 
-        # Success path: update the placeholder session
         debug_success(f"Workflow completed with {len(msgs)} agent messages")
 
         current_sessions = query_sessions.get()
-        # We know our placeholder is at index 0
         target = current_sessions[0]
         target.messages = msgs
         target.completed = True
 
-        # Extract and display structured data
         target.extract_structured_data()
 
-        # Build the status string
         parts = ["✅ Complete"]
         if target.recommended_cities:
             parts.append(f"{len(target.recommended_cities)} cities")
@@ -845,20 +795,15 @@ def server(input, output, session):
             parts.append("flight data")
         target.status = " | ".join(parts)
 
-        # Push updates back into the reactive list
         query_sessions.set(current_sessions)
-
-        # Final progress/status updates
         current_progress.set("✅ Workflow completed with structured data extraction")
         workflow_status.set("✅ Enhanced AI workflow completed with structured data display")
 
-    # Enhanced output functions
+    # Output functions
     @output
     @render.ui
     def system_status_display():
-        """Display system status in sidebar."""
         status = workflow_status.get()
-
         if status.startswith("✅"):
             status_class = "system-status"
         elif status.startswith("⚠️"):
@@ -876,12 +821,10 @@ def server(input, output, session):
     @output
     @render.ui
     def progress_display():
-        """Enhanced progress display."""
         progress = current_progress.get()
         if not progress:
             return ui.div()
 
-        # Calculate progress percentage
         progress_width = "0%"
         if "Researcher" in progress and "(" in progress:
             try:
@@ -915,31 +858,21 @@ def server(input, output, session):
     @output
     @render.ui
     def debug_console():
-        """Real-time debug console display with proper reactive dependency."""
-        # Direct call to debug_entries.get() for proper reactive binding
         entries = debug_entries.get()
 
-        # Always show some content, even if no entries
         if not entries:
             return ui.div(
-                ui.div("🔍 Debug Console Ready",
-                       style="color: #4CAF50; font-weight: bold; margin-bottom: 10px; border-bottom: 1px solid #333; padding-bottom: 5px;"),
+                ui.div("🔍 Debug Console Ready", style="color: #4CAF50; font-weight: bold; margin-bottom: 10px; border-bottom: 1px solid #333; padding-bottom: 5px;"),
                 ui.div("• System initialized and waiting for queries", style="color: #9E9E9E; margin-bottom: 5px;"),
-                ui.div("• Activity will appear here in real-time during workflow execution",
-                       style="color: #9E9E9E; margin-bottom: 5px;"),
-                ui.div("• Try the '🧪 Test Debug Console' button to verify functionality",
-                       style="color: #9E9E9E; margin-bottom: 5px;"),
-                ui.div("• Or run one of the example queries to see debug output",
-                       style="color: #9E9E9E; margin-bottom: 5px;"),
-                ui.div(f"• Current time: {datetime.now().strftime('%H:%M:%S')}",
-                       style="color: #666; margin-top: 10px; font-size: 0.9em;"),
+                ui.div("• Activity will appear here in real-time during workflow execution", style="color: #9E9E9E; margin-bottom: 5px;"),
+                ui.div("• Try the '🧪 Test Debug Console' button to verify functionality", style="color: #9E9E9E; margin-bottom: 5px;"),
+                ui.div("• Or run one of the example queries to see debug output", style="color: #9E9E9E; margin-bottom: 5px;"),
+                ui.div(f"• Current time: {datetime.now().strftime('%H:%M:%S')}", style="color: #666; margin-top: 10px; font-size: 0.9em;"),
                 class_="debug-console"
             )
 
-        # Create debug entry elements with better formatting
         entry_elements = []
-        for entry in entries[-50:]:  # Show last 50 entries
-            # Determine entry type from level
+        for entry in entries[-50:]:
             entry_style = "color: #e0e0e0; margin-bottom: 3px; padding: 2px 0;"
             if "SUCCESS:" in entry:
                 entry_style = "color: #00E676; margin-bottom: 3px; padding: 2px 0; font-weight: bold;"
@@ -952,126 +885,83 @@ def server(input, output, session):
             elif "DEBUG:" in entry:
                 entry_style = "color: #9E9E9E; margin-bottom: 3px; padding: 2px 0;"
 
-            entry_elements.append(
-                ui.div(entry, style=entry_style)
-            )
+            entry_elements.append(ui.div(entry, style=entry_style))
 
         return ui.div(
-            ui.div(f"🔍 Debug Console - {len(entries)} entries",
-                   style="color: #4CAF50; font-weight: bold; margin-bottom: 10px; border-bottom: 1px solid #333; padding-bottom: 5px;"),
-            ui.div("(Most recent entries shown first)",
-                   style="color: #666; font-size: 0.85em; margin-bottom: 10px; font-style: italic;"),
-            *reversed(entry_elements),  # Show most recent first
+            ui.div(f"🔍 Debug Console - {len(entries)} entries", style="color: #4CAF50; font-weight: bold; margin-bottom: 10px; border-bottom: 1px solid #333; padding-bottom: 5px;"),
+            ui.div("(Most recent entries shown first)", style="color: #666; font-size: 0.85em; margin-bottom: 10px; font-style: italic;"),
+            *reversed(entry_elements),
             class_="debug-console"
         )
 
     @output
     @render.ui
     def sessions_display():
-        """Enhanced sessions display with structured data."""
         sessions = query_sessions.get()
         if not sessions:
             return ui.div(
                 ui.div(
-                    ui.h4("🌍 Enhanced Climate Intelligence & Flight System",
-                          style="color: white; margin-bottom: 20px;"),
-                    ui.p("Ready to provide structured travel recommendations with comprehensive data display!",
-                         style="color: rgba(255,255,255,0.9); margin-bottom: 15px;"),
-
+                    ui.h4("🌍 Enhanced Climate Intelligence & Flight System", style="color: white; margin-bottom: 20px;"),
+                    ui.p("Ready to provide structured travel recommendations with comprehensive data display!", style="color: rgba(255,255,255,0.9); margin-bottom: 15px;"),
                     ui.div(
                         ui.div(
-                            ui.h6("📋 What You'll See After Running Queries:",
-                                  style="color: white; margin-bottom: 12px; text-align: center;"),
-                            ui.div(
-                                "Below this welcome screen, query results will appear with these structured sections:",
-                                style="color: rgba(255,255,255,0.9); margin-bottom: 15px; text-align: center; font-style: italic;"),
-                            style="grid-column: 1 / -1; background: rgba(0,0,0,0.2); padding: 15px; border-radius: 8px; margin-bottom: 15px;"
-                        ),
-                        ui.div(
                             ui.h6("🌡️ Weather Analysis Summary", style="color: white; margin-bottom: 8px;"),
-                            ui.p("• Cities analyzed, average scores, climate alerts count",
-                                 style="color: rgba(255,255,255,0.8); font-size: 0.9em; margin: 2px 0;"),
-                            ui.p("• Visual statistics dashboard with key metrics",
-                                 style="color: rgba(255,255,255,0.8); font-size: 0.9em; margin: 2px 0;"),
+                            ui.p("• Cities analyzed, average scores, climate alerts count", style="color: rgba(255,255,255,0.8); font-size: 0.9em; margin: 2px 0;"),
+                            ui.p("• Visual statistics dashboard with key metrics", style="color: rgba(255,255,255,0.8); font-size: 0.9em; margin: 2px 0;"),
                             class_="feature-card"
                         ),
                         ui.div(
                             ui.h6("🚨 Climate Alerts", style="color: white; margin-bottom: 8px;"),
-                            ui.p("• Unusual weather conditions with severity levels",
-                                 style="color: rgba(255,255,255,0.8); font-size: 0.9em; margin: 2px 0;"),
-                            ui.p("• Specific recommendations for unusual weather",
-                                 style="color: rgba(255,255,255,0.8); font-size: 0.9em; margin: 2px 0;"),
+                            ui.p("• Unusual weather conditions with severity levels", style="color: rgba(255,255,255,0.8); font-size: 0.9em; margin: 2px 0;"),
+                            ui.p("• Specific recommendations for unusual weather", style="color: rgba(255,255,255,0.8); font-size: 0.9em; margin: 2px 0;"),
                             class_="feature-card"
                         ),
                         ui.div(
                             ui.h6("🏆 Recommended Cities", style="color: white; margin-bottom: 8px;"),
-                            ui.p("• Top 5 destinations with weather & climate scores",
-                                 style="color: rgba(255,255,255,0.8); font-size: 0.9em; margin: 2px 0;"),
-                            ui.p("• Flight info: 'Lufthansa LH123 | 8h 30m | Live Data'",
-                                 style="color: rgba(255,255,255,0.8); font-size: 0.9em; margin: 2px 0;"),
-                            ui.p("• Temperature, weather description, meets criteria",
-                                 style="color: rgba(255,255,255,0.8); font-size: 0.9em; margin: 2px 0;"),
+                            ui.p("• Top 5 destinations with weather & climate scores", style="color: rgba(255,255,255,0.8); font-size: 0.9em; margin: 2px 0;"),
+                            ui.p("• Flight info: 'Lufthansa LH123 | 8h 30m | Live Data'", style="color: rgba(255,255,255,0.8); font-size: 0.9em; margin: 2px 0;"),
+                            ui.p("• Temperature, weather description, meets criteria", style="color: rgba(255,255,255,0.8); font-size: 0.9em; margin: 2px 0;"),
                             class_="feature-card"
                         ),
                         ui.div(
                             ui.h6("✈️ Flight Intelligence", style="color: white; margin-bottom: 8px;"),
-                            ui.p("• Real-time FlightRadar24 data vs estimates",
-                                 style="color: rgba(255,255,255,0.8); font-size: 0.9em; margin: 2px 0;"),
-                            ui.p("• Flight analysis success rates and data quality",
-                                 style="color: rgba(255,255,255,0.8); font-size: 0.9em; margin: 2px 0;"),
+                            ui.p("• Real-time FlightRadar24 data vs estimates", style="color: rgba(255,255,255,0.8); font-size: 0.9em; margin: 2px 0;"),
+                            ui.p("• Flight analysis success rates and data quality", style="color: rgba(255,255,255,0.8); font-size: 0.9em; margin: 2px 0;"),
                             class_="feature-card"
                         ),
                         ui.div(
                             ui.h6("🗓️ Weather Itineraries", style="color: white; margin-bottom: 8px;"),
-                            ui.p("• Day-by-day weather-appropriate activity plans",
-                                 style="color: rgba(255,255,255,0.8); font-size: 0.9em; margin: 2px 0;"),
-                            ui.p("• Morning/afternoon/evening recommendations",
-                                 style="color: rgba(255,255,255,0.8); font-size: 0.9em; margin: 2px 0;"),
-                            ui.p("• Weather gear and backup plan suggestions",
-                                 style="color: rgba(255,255,255,0.8); font-size: 0.9em; margin: 2px 0;"),
+                            ui.p("• Day-by-day weather-appropriate activity plans", style="color: rgba(255,255,255,0.8); font-size: 0.9em; margin: 2px 0;"),
+                            ui.p("• Morning/afternoon/evening recommendations", style="color: rgba(255,255,255,0.8); font-size: 0.9em; margin: 2px 0;"),
+                            ui.p("• Weather gear and backup plan suggestions", style="color: rgba(255,255,255,0.8); font-size: 0.9em; margin: 2px 0;"),
                             class_="feature-card"
                         ),
                         class_="feature-grid"
                     ),
-
-                    ui.p(
-                        "👆 Click any example above to see all sections populated with real data below!",
-                        style="color: white; text-align: center; margin-top: 30px; font-weight: 500;"
-                    ),
-                    ui.p(
-                        "💡 Also try the '🔍 Debug Console' button above to see real-time processing",
-                        style="color: rgba(255,255,255,0.8); text-align: center; margin-top: 10px; font-size: 0.9em;"
-                    ),
+                    ui.p("👆 Click any example above to see all sections populated with real data below!", style="color: white; text-align: center; margin-top: 30px; font-weight: 500;"),
+                    ui.p("💡 Also try the '🔍 Debug Console' button above to see real-time processing", style="color: rgba(255,255,255,0.8); text-align: center; margin-top: 10px; font-size: 0.9em;"),
                     class_="welcome-content"
                 )
             )
 
         session_elements = []
         for session in sessions:
-            # Session header
             expanded_class = "" if session.expanded else "session-collapsed"
             toggle_text = "📕 Collapse" if session.expanded else "📖 Expand"
 
             session_header = ui.div(
                 ui.div(
-                    ui.h5(f"Query: {session.query[:60]}{'...' if len(session.query) > 60 else ''}",
-                          style="margin: 0; color: white;"),
-                    ui.p(f"{session.display_time} | {session.status}",
-                         style="margin: 5px 0 0 0; color: rgba(255,255,255,0.8); font-size: 0.9em;")
+                    ui.h5(f"Query: {session.query[:60]}{'...' if len(session.query) > 60 else ''}", style="margin: 0; color: white;"),
+                    ui.p(f"{session.display_time} | {session.status}", style="margin: 5px 0 0 0; color: rgba(255,255,255,0.8); font-size: 0.9em;")
                 ),
-                ui.button(
-                    toggle_text,
-                    onclick=f"toggleSession('{session.session_id}')",
-                    class_="btn-toggle"
-                ),
+                ui.button(toggle_text, onclick=f"toggleSession('{session.session_id}')", class_="btn-toggle"),
                 class_="session-header"
             )
 
-            # Enhanced session content with structured data
             if session.messages and session.completed:
                 content_elements = []
 
-                # 1. Weather Analysis Summary
+                # Weather Analysis Summary
                 if session.weather_analysis:
                     wa = session.weather_analysis
                     content_elements.append(
@@ -1104,20 +994,16 @@ def server(input, output, session):
                         )
                     )
 
-                # 2. Climate Alerts (if any)
+                # Climate Alerts
                 if session.climate_alerts:
                     alert_elements = []
                     for alert in session.climate_alerts:
                         alert_class = "climate-alert extreme" if alert["level"] == "extreme" else "climate-alert"
                         alert_elements.append(
                             ui.div(
-                                ui.div(
-                                    ui.strong(f"🚨 {alert['city']} - {alert['level'].upper()} ALERT"),
-                                    style="display: block; margin-bottom: 8px;"
-                                ),
+                                ui.div(ui.strong(f"🚨 {alert['city']} - {alert['level'].upper()} ALERT"), style="display: block; margin-bottom: 8px;"),
                                 ui.p(alert["message"], style="margin: 5px 0;"),
-                                ui.ul(*[ui.li(rec) for rec in alert["recommendations"][:2]]) if alert[
-                                    "recommendations"] else "",
+                                ui.ul(*[ui.li(rec) for rec in alert["recommendations"][:2]]) if alert["recommendations"] else "",
                                 class_=alert_class
                             )
                         )
@@ -1130,11 +1016,10 @@ def server(input, output, session):
                         )
                     )
 
-                # 3. Recommended Cities
+                # Recommended Cities
                 if session.recommended_cities:
                     city_elements = []
                     for i, city in enumerate(session.recommended_cities[:5], 1):
-                        # Extract city information
                         city_name = city.get("city", "Unknown")
                         country = city.get("country", "")
                         temp_avg = city.get("temp_avg", 0)
@@ -1144,22 +1029,16 @@ def server(input, output, session):
                         flight_score = city.get("flight_score", 0)
                         meets_criteria = city.get("meets_criteria", False)
 
-                        # Flight information
                         flight_info_elem = ""
                         if city.get("flight_analysis_success"):
                             recommendations = city.get("recommendations", [])
                             if recommendations:
                                 best_flight = recommendations[0]
-                                data_source = "🔴 Live Data" if city.get(
-                                    "real_flight_data_available") else "📊 Estimated"
+                                data_source = "🔴 Live Data" if city.get("real_flight_data_available") else "📊 Estimated"
                                 flight_info_elem = ui.div(
-                                    ui.p(f"✈️ Best Flight: {best_flight.airline} {best_flight.flight_number}",
-                                         style="margin: 0; font-weight: bold;"),
-                                    ui.p(
-                                        f"Duration: {best_flight.duration_display} | Score: {best_flight.overall_score:.1f}/10 | {data_source}",
-                                        style="margin: 2px 0; font-size: 0.9em;"),
-                                    ui.p(f"Route: {best_flight.origin_airport} → {best_flight.destination_airport}",
-                                         style="margin: 0; font-size: 0.85em; color: #666;"),
+                                    ui.p(f"✈️ Best Flight: {best_flight.airline} {best_flight.flight_number}", style="margin: 0; font-weight: bold;"),
+                                    ui.p(f"Duration: {best_flight.duration_display} | Score: {best_flight.overall_score:.1f}/10 | {data_source}", style="margin: 2px 0; font-size: 0.9em;"),
+                                    ui.p(f"Route: {best_flight.origin_airport} → {best_flight.destination_airport}", style="margin: 0; font-size: 0.85em; color: #666;"),
                                     class_="flight-info"
                                 )
 
@@ -1175,8 +1054,7 @@ def server(input, output, session):
                                     ui.div(f"🌡️ {temp_avg:.1f}°C - {weather_desc}", class_="city-detail"),
                                     ui.div(f"🌦️ Climate Score: {climate_score:.1f}/10", class_="city-detail"),
                                     ui.div(f"✈️ Flight Score: {flight_score:.1f}/10", class_="city-detail"),
-                                    ui.div(f"{'✅ Meets criteria' if meets_criteria else '⚠️ Outside criteria'}",
-                                           class_="city-detail"),
+                                    ui.div(f"{'✅ Meets criteria' if meets_criteria else '⚠️ Outside criteria'}", class_="city-detail"),
                                     class_="city-details"
                                 ),
                                 flight_info_elem,
@@ -1192,16 +1070,13 @@ def server(input, output, session):
                         )
                     )
 
-                # 4. Flight Analysis Summary
+                # Flight Analysis Summary
                 if session.flight_data:
                     fd = session.flight_data
                     flight_summary = ui.div(
-                        ui.p(
-                            f"✈️ Flight Analysis: {fd.get('flight_successes', 0)}/{fd.get('total_analyzed', 0)} destinations analyzed"),
-                        ui.p(
-                            f"📡 FlightRadar24: {'Available' if fd.get('fr24_available') else 'Not configured'} | Live data: {fd.get('successful_calls', 0)} calls"),
-                        ui.p(
-                            f"🎯 Data Quality: {'High (real-time)' if fd.get('successful_calls', 0) > 0 else 'Estimated (geographic)'}"),
+                        ui.p(f"✈️ Flight Analysis: {fd.get('flight_successes', 0)}/{fd.get('total_analyzed', 0)} destinations analyzed"),
+                        ui.p(f"📡 FlightRadar24: {'Available' if fd.get('fr24_available') else 'Not configured'} | Live data: {fd.get('successful_calls', 0)} calls"),
+                        ui.p(f"🎯 Data Quality: {'High (real-time)' if fd.get('successful_calls', 0) > 0 else 'Estimated (geographic)'}"),
                         style="margin: 0;"
                     )
 
@@ -1213,11 +1088,10 @@ def server(input, output, session):
                         )
                     )
 
-                # 5. Weather Itineraries
+                # Weather Itineraries
                 if session.itineraries:
                     itinerary_elements = []
                     for i, itinerary in enumerate(session.itineraries, 1):
-                        # Parse itinerary into days
                         day_sections = []
                         lines = itinerary.split('\n')
                         current_day = []
@@ -1235,9 +1109,8 @@ def server(input, output, session):
                             day_sections.append('\n'.join(current_day))
 
                         day_elements = []
-                        for day_content in day_sections[:4]:  # Show up to 4 days
+                        for day_content in day_sections[:4]:
                             if '**DAY' in day_content or '🗓️' in day_content:
-                                # Extract day title
                                 day_lines = day_content.split('\n')
                                 day_title = day_lines[0].replace('**', '').replace('🗓️', '').strip()
                                 day_details = '\n'.join(day_lines[1:])
@@ -1245,16 +1118,14 @@ def server(input, output, session):
                                 day_elements.append(
                                     ui.div(
                                         ui.div(day_title, class_="itinerary-day-title"),
-                                        ui.pre(day_details,
-                                               style="white-space: pre-wrap; margin: 0; font-size: 0.9em; line-height: 1.4;"),
+                                        ui.pre(day_details, style="white-space: pre-wrap; margin: 0; font-size: 0.9em; line-height: 1.4;"),
                                         class_="itinerary-day"
                                     )
                                 )
 
                         itinerary_elements.append(
                             ui.div(
-                                ui.h6(f"Itinerary {i}",
-                                      style="color: #6a1b9a; margin-bottom: 15px; font-weight: bold;"),
+                                ui.h6(f"Itinerary {i}", style="color: #6a1b9a; margin-bottom: 15px; font-weight: bold;"),
                                 *day_elements,
                                 class_="itinerary-container"
                             )
@@ -1271,8 +1142,7 @@ def server(input, output, session):
                 session_content = ui.div(*content_elements, class_="session-content")
             else:
                 session_content = ui.div(
-                    ui.p("🔄 Processing query..." if not session.completed else "❌ No structured data available",
-                         style="text-align: center; padding: 20px; color: #666;"),
+                    ui.p("🔄 Processing query..." if not session.completed else "❌ No structured data available", style="text-align: center; padding: 20px; color: #666;"),
                     class_="session-content"
                 )
 
