@@ -605,6 +605,16 @@ def server(input, output, session):
     internal_debug_entries: List[str] = []
     debug_state = {"callback_running": False}
 
+    def make_progress_callback(session, current_progress):
+        """Return a progress callback that directly updates your reactive."""
+
+        def progress_callback(step: ProgressStep):
+            # Just stringify and set the reactive.Value—
+            # Shiny Python will pick it up.
+            current_progress.set(str(step))
+
+        return progress_callback
+
     # Debug callback
     def debug_callback(entry: str):
         if debug_state["callback_running"]:
@@ -638,7 +648,7 @@ def server(input, output, session):
             current_progress.set(f"⏳ Working... ({datetime.now().strftime('%H:%M:%S')})")
 
     if ai_system:
-        ai_system.set_progress_callback(progress_callback)
+        ai_system.set_progress_callback(make_progress_callback(session, current_progress))
 
     # Force UI update when debug entries change
     @reactive.Effect
